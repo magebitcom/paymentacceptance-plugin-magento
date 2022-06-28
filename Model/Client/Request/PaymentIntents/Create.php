@@ -32,7 +32,7 @@ class Create extends AbstractClient implements BearerAuthenticationInterface
     public function setQuote(Quote $quote, string $returnUrl): self
     {
         return $this->setParams([
-            'amount' => $quote->getBaseGrandTotal(),
+            'amount' => $quote->getGrandTotal(),
             'currency' => $quote->getQuoteCurrencyCode(),
             'merchant_order_id' => $quote->getReservedOrderId(),
             'supplementary_amount' => 1,
