@@ -70,22 +70,22 @@ class Index implements HttpPostActionInterface, CsrfAwareActionInterface
     }
 
     /**
-     * Get request from airwallex. Check request checksum for security. Each request parse and run webhook action
+     * Receive, validate and parse incoming webhook from Airwallex. If valid, run webhook action.
      *
      * @return ResponseHttp
-     * @throws \JsonException
      */
     public function execute()
     {
-        $data = json_decode($this->request->getContent(), false, self::JSON_DECODE_DEPTH, JSON_THROW_ON_ERROR);
-
         try {
+            $data = json_decode($this->request->getContent(), false, self::JSON_DECODE_DEPTH, JSON_THROW_ON_ERROR);
+
             $this->webhook->checkChecksum($this->request);
             if ($data->data) {
                 $this->webhook->dispatch($data->name, $data->data->object);
             }
         } catch (Exception $exception) {
-            $this->logger->addError($exception->getMessage());
+            $this->logger->error('Webhook error: ' . $exception->getMessage());
+            $this->logger->notice('Webhook contents: ' . $this->request->getContent());
         }
 
         return $this->response->setStatusCode(self::HTTP_OK);
