@@ -25,10 +25,10 @@
             <config_path>payment/airwallex_payments_card/active</config_path>
         </field>
         <field id="vault_active" translate="label" type="select" sortOrder="1" showInDefault="1" showInWebsite="1" canRestore="1">
-            <label>Enable Vault for Credit Card</label>
-            <comment>Enable Save Card</comment>
+            <label>Allow shoppers to save cards</label>
+            <comment><![CDATA[This will allow shoppers to save cards for future purchases on your store.]]></comment>
             <source_model>Magento\Config\Model\Config\Source\Yesno</source_model>
-            <config_path>payment/airwallex_payments_card_vault/active</config_path>
+            <config_path>payment/airwallex_payments_card/vault_active</config_path>
         </field>
         <field id="title" translate="label comment" type="text" sortOrder="40" showInDefault="1" showInWebsite="1" showInStore="1">
             <label>Title</label>

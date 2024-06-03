@@ -85,7 +85,6 @@ define(
                 this.expressDataObjects().forEach(o => {
                     Object.assign(o.expressData, expressData);
                 });
-                utils.toggleMaskFormLogin();
             },
 
             updatePaymentConfig(paymentConfig) {
@@ -145,7 +144,7 @@ define(
 
                 googlepay.from = this.from;
                 applepay.from = this.from;
-                this.paymentConfig.express_button_sort.forEach(v => {
+                this.paymentConfig.express_button_sort.sort().forEach(v => {
                     this.buttonSort.push(v);
                 });
 
@@ -158,7 +157,6 @@ define(
             },
 
             async loadPayment() {
-                utils.toggleMaskFormLogin();
                 this.initMinicartClickEvents();
                 utils.initProductPageFormClickEvents();
                 this.initHashPaymentEvent();
