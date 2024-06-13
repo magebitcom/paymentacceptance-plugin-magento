@@ -1,18 +1,5 @@
 <?php
-/**
- * This file is part of the Airwallex Payments module.
- *
- * DISCLAIMER
- *
- * Do not edit or add to this file if you wish to upgrade
- * to newer versions in the future.
- *
- * @copyright Copyright (c) 2021 Magebit, Ltd. (https://magebit.com/)
- * @license   GNU General Public License ("GPL") v3.0
- *
- * For the full copyright and license information, please view the LICENSE
- * file that was distributed with this source code.
- */
+
 namespace Airwallex\Payments\Helper;
 
 use Airwallex\Payments\Model\Client\Request\AvailablePaymentMethods;
@@ -50,7 +37,7 @@ class AvailablePaymentMethodsHelper
     /**
      * @var Configuration
      */
-    private Configuration $configuration;
+    public Configuration $configuration;
 
     /**
      * @var array
@@ -112,6 +99,9 @@ class AvailablePaymentMethodsHelper
      */
     public function isAvailable(string $code): bool
     {
+        if ($code === 'airwallex_cc_vault') {
+            $code = 'card';
+        }
         if ($code === 'express') {
             return $this->canInitialize() && !!array_intersect($this->methodsInExpress, $this->getAllMethods());
         }
@@ -159,7 +149,11 @@ class AvailablePaymentMethodsHelper
         $methods = $this->cache->load($this->availablePaymentMethod->cacheName);
 
         if (!$methods) {
-            $this->fetch();
+            try {
+                $this->fetch();
+            } catch (\Exception $e) {
+
+            }
             $methods = $this->cache->load($this->availablePaymentMethod->cacheName);
         }
         return json_decode($methods, true);
