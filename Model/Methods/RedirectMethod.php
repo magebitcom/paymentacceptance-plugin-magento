@@ -1,25 +1,15 @@
 <?php
-/**
- * This file is part of the Airwallex Payments module.
- *
- * DISCLAIMER
- *
- * Do not edit or add to this file if you wish to upgrade
- * to newer versions in the future.
- *
- * @copyright Copyright (c) 2021 Magebit, Ltd. (https://magebit.com/)
- * @license   GNU General Public License ("GPL") v3.0
- *
- * For the full copyright and license information, please view the LICENSE
- * file that was distributed with this source code.
- */
+
 namespace Airwallex\Payments\Model\Methods;
 
+use Airwallex\Payments\Model\Client\AbstractClient;
 use GuzzleHttp\Exception\GuzzleException;
+use JsonException;
 use Magento\Framework\Exception\AlreadyExistsException;
 use Magento\Framework\Exception\LocalizedException;
 use Magento\Payment\Model\InfoInterface;
 use Magento\Quote\Api\Data\CartInterface;
+use Magento\Sales\Model\Order\Payment;
 use Mobile_Detect;
 use Exception;
 
@@ -32,7 +22,8 @@ class RedirectMethod extends AbstractMethod
     public const KAKAO_CODE = 'airwallex_payments_kakaopay';
     public const TOUCH_N_GO_CODE = 'airwallex_payments_tng';
     public const WECHAT_CODE = 'airwallex_payments_wechatpay';
-    
+    public const PAY_NOW_CODE = 'airwallex_payments_pay_now';
+
     /**
      * @param InfoInterface $payment
      * @param float $amount
@@ -40,27 +31,36 @@ class RedirectMethod extends AbstractMethod
      * @return $this
      * @throws GuzzleException
      * @throws AlreadyExistsException
-     * @throws LocalizedException
+     * @throws LocalizedException|JsonException
      */
     public function authorize(InfoInterface $payment, $amount): self
     {
-        parent::authorize($payment, $amount);
+        $cacheName = AbstractClient::METADATA_PAYMENT_METHOD_PREFIX . $this->checkoutHelper->getQuote()->getEntityId();
+        /** @var Payment $payment */
+        $this->cache->save($payment->getMethod(), $cacheName, [], 60);
+        $intendResponse = $this->paymentIntents->getIntent();
+        $returnUrl = $this->getAirwallexPaymentsRedirectUrl($intendResponse['id']);
+        $this->checkoutHelper->getCheckout()->setAirwallexPaymentsRedirectUrl($returnUrl);
+        return $this;
+    }
 
+    /**
+     * @throws GuzzleException
+     * @throws LocalizedException
+     */
+    public function getAirwallexPaymentsRedirectUrl($intentId)
+    {
         $detect = new Mobile_Detect();
-
         try {
-            $this->paymentIntents->removeIntents();
             $returnUrl = $this->confirm
-                ->setPaymentIntentId($this->getIntentId())
+                ->setPaymentIntentId($intentId)
                 ->setInformation($this->getPaymentMethodCode(), $detect->isMobile(), $this->getMobileOS($detect))
                 ->send();
         } catch (Exception $exception) {
             throw new LocalizedException(__($exception->getMessage()));
         }
 
-        $this->checkoutHelper->getCheckout()->setAirwallexPaymentsRedirectUrl($returnUrl);
-
-        return $this;
+        return $returnUrl;
     }
 
     /**

@@ -1,18 +1,5 @@
 <?php
-/**
- * This file is part of the Airwallex Payments module.
- *
- * DISCLAIMER
- *
- * Do not edit or add to this file if you wish to upgrade
- * to newer versions in the future.
- *
- * @copyright Copyright (c) 2021 Magebit, Ltd. (https://magebit.com/)
- * @license   GNU General Public License ("GPL") v3.0
- *
- * For the full copyright and license information, please view the LICENSE
- * file that was distributed with this source code.
- */
+
 namespace Airwallex\Payments\Model\Methods;
 
 use Airwallex\Payments\Helper\AvailablePaymentMethodsHelper;
@@ -38,10 +25,13 @@ use Magento\Payment\Gateway\Validator\ValidatorPoolInterface;
 use Magento\Payment\Model\InfoInterface;
 use Magento\Payment\Model\Method\Adapter;
 use Magento\Quote\Api\Data\CartInterface;
-use Psr\Log\LoggerInterface;
+use Magento\Sales\Model\Order\Creditmemo;
+use Magento\Sales\Model\Order\Payment;
 use RuntimeException;
 use Airwallex\Payments\Model\Client\Request\PaymentIntents\Get;
 use Airwallex\Payments\Model\Traits\HelperTrait;
+use Airwallex\Payments\Logger\Logger;
+use Magento\Framework\App\CacheInterface;
 
 /**
  * @SuppressWarnings(PHPMD.CouplingBetweenObjects)
@@ -56,9 +46,9 @@ abstract class AbstractMethod extends Adapter
     public const ADDITIONAL_DATA = ['intent_id', 'intent_status'];
 
     /**
-     * @var LoggerInterface|null
+     * @var Logger
      */
-    protected ?LoggerInterface $logger;
+    protected Logger $logger;
 
     /**
      * @var Refund
@@ -73,12 +63,13 @@ abstract class AbstractMethod extends Adapter
     /**
      * @var PaymentIntentRepository
      */
-    private PaymentIntentRepository $paymentIntentRepository;
+    protected PaymentIntentRepository $paymentIntentRepository;
 
     /**
      * @var Cancel
      */
     private Cancel $cancel;
+
     /**
      * @var CancelHelper
      */
@@ -104,6 +95,11 @@ abstract class AbstractMethod extends Adapter
      */
     protected PaymentIntents $paymentIntents;
 
+    /**
+     * @var CacheInterface
+     */
+    protected CacheInterface $cache;
+
     protected Get $intentGet;
 
     /**
@@ -125,33 +121,36 @@ abstract class AbstractMethod extends Adapter
      * @param CancelHelper $cancelHelper
      * @param PaymentIntentRepository $paymentIntentRepository
      * @param Get $intentGet
+     * @param Logger $logger
+     * @param CacheInterface $cache
      * @param CommandPoolInterface|null $commandPool
      * @param ValidatorPoolInterface|null $validatorPool
      * @param CommandManagerInterface|null $commandExecutor
-     * @param LoggerInterface|null $logger
      */
     public function __construct(
-        PaymentIntents $paymentIntents,
-        ManagerInterface $eventManager,
-        ValueHandlerPoolInterface $valueHandlerPool,
-        PaymentDataObjectFactory $paymentDataObjectFactory,
-        $code,
-        $formBlockType,
-        $infoBlockType,
-        Refund $refund,
-        Capture $capture,
-        Cancel $cancel,
-        Confirm $confirm,
-        CheckoutData $checkoutHelper,
+        PaymentIntents                $paymentIntents,
+        ManagerInterface              $eventManager,
+        ValueHandlerPoolInterface     $valueHandlerPool,
+        PaymentDataObjectFactory      $paymentDataObjectFactory,
+        string                        $code,
+        string                        $formBlockType,
+        string                        $infoBlockType,
+        Refund                        $refund,
+        Capture                       $capture,
+        Cancel                        $cancel,
+        Confirm                       $confirm,
+        CheckoutData                  $checkoutHelper,
         AvailablePaymentMethodsHelper $availablePaymentMethodsHelper,
-        CancelHelper $cancelHelper,
-        PaymentIntentRepository $paymentIntentRepository,
-        Get $intentGet,
-        CommandPoolInterface $commandPool = null,
-        ValidatorPoolInterface $validatorPool = null,
-        CommandManagerInterface $commandExecutor = null,
-        LoggerInterface $logger = null
-    ) {
+        CancelHelper                  $cancelHelper,
+        PaymentIntentRepository       $paymentIntentRepository,
+        Get                           $intentGet,
+        Logger                        $logger,
+        CacheInterface                $cache,
+        CommandPoolInterface          $commandPool = null,
+        ValidatorPoolInterface        $validatorPool = null,
+        CommandManagerInterface       $commandExecutor = null
+    )
+    {
         parent::__construct(
             $eventManager,
             $valueHandlerPool,
@@ -162,7 +161,7 @@ abstract class AbstractMethod extends Adapter
             $commandPool,
             $validatorPool,
             $commandExecutor,
-            $logger,
+            $logger
         );
         $this->paymentIntents = $paymentIntents;
         $this->logger = $logger;
@@ -175,6 +174,7 @@ abstract class AbstractMethod extends Adapter
         $this->confirm = $confirm;
         $this->checkoutHelper = $checkoutHelper;
         $this->intentGet = $intentGet;
+        $this->cache = $cache;
     }
 
     /**
@@ -206,24 +206,22 @@ abstract class AbstractMethod extends Adapter
      */
     public function authorize(InfoInterface $payment, $amount): self
     {
-        $this->insertIntentWithOrder($payment);
+        $this->setTransactionId($payment);
         return $this;
     }
 
     /**
-     * @param InfoInterface $payment
-     *
-     * @return void
-     * @throws AlreadyExistsException|LocalizedException
-     * @SuppressWarnings(PHPMD.UnusedFormalParameter)
+     * @throws LocalizedException
      */
-    protected function insertIntentWithOrder(InfoInterface $payment) {
+    protected function setTransactionId($payment)
+    {
         $intentId = $this->getIntentId();
-
+        if (empty($intentId)) {
+            throw new LocalizedException(__('Something went wrong while trying to capture the payment.'));
+        }
+        /** @var Payment $payment */
         $payment->setTransactionId($intentId);
         $payment->setIsTransactionClosed(false);
-
-        $this->paymentIntentRepository->save($payment->getOrder()->getIncrementId(), $intentId);
     }
 
     /**
@@ -232,10 +230,11 @@ abstract class AbstractMethod extends Adapter
      *
      * @return $this
      * @SuppressWarnings(PHPMD.UnusedFormalParameter)
+     * @throws LocalizedException
      */
     public function capture(InfoInterface $payment, $amount): self
     {
-        $this->insertIntentWithOrder($payment);
+        $this->setTransactionId($payment);
         return $this;
     }
 
@@ -251,11 +250,10 @@ abstract class AbstractMethod extends Adapter
             return $this;
         }
 
-        $paymentTransactionId = str_replace(['-void', '-cancel'], '', $payment->getTransactionId());
-
         try {
-            $this->cancel->setPaymentIntentId($paymentTransactionId)->send();
+            $this->cancel->setPaymentIntentId($this->getIntentId())->send();
         } catch (GuzzleException $exception) {
+            /** @var Payment $payment */
             $this->logger->orderError($payment->getOrder(), 'cancel', $exception->getMessage());
             throw new RuntimeException(__($exception->getMessage()));
         }
@@ -265,33 +263,35 @@ abstract class AbstractMethod extends Adapter
 
     /**
      * @param InfoInterface $payment
-     * @param float $amount
+     * @param float $baseAmount
      *
      * @return $this
      * @throws Exception
      */
-    public function refund(InfoInterface $payment, $amount): self
+    public function refund(InfoInterface $payment, $baseAmount): self
     {
-        $order = $payment->getOrder();
-        $creditmemo = $payment->getCreditmemo();
+        /** @var Payment $payment */
+        $credit = $payment->getCreditmemo();
 
-        if ($amount == $creditmemo->getBaseGrandTotal()) {
-            $targetAmount = $creditmemo->getGrandTotal();
-        } else {
-            $targetAmount = $this->convertToDisplayCurrency($amount, $order->getBaseToOrderRate());
-        }
-
-        $paymentTransactionId = str_replace('-refund', '', $payment->getTransactionId());
-        $paymentTransactionId = str_replace('-capture', '', $paymentTransactionId);
+        $intentId = $this->getIntentId();
+        $this->cache->save(true, $this->refundCacheName($intentId), [], 3600);
         try {
-            $this->refund
-                ->setInformation($paymentTransactionId, $targetAmount)
-                ->send();
+            /** @var Creditmemo $credit */
+            $res = $this->refund->setInformation($intentId, $credit->getGrandTotal())->send();
+
+            $record = $this->paymentIntentRepository->getByIntentId($intentId);
+            $detail = $record->getDetail();
+            $detailArray = $detail ? json_decode($detail, true) : [];
+            if (empty($detailArray['refund_ids'])) {
+                $detailArray['refund_ids'] = [];
+            }
+            $detailArray['refund_ids'][] = $res->id;
+            $this->paymentIntentRepository->updateDetail($record, json_encode($detailArray));
         } catch (GuzzleException $exception) {
             $this->logger->orderError($payment->getOrder(), 'refund', $exception->getMessage());
             throw new RuntimeException(__($exception->getMessage()));
         }
-
+//        sleep(4);
         return $this;
     }
 
@@ -323,13 +323,7 @@ abstract class AbstractMethod extends Adapter
      */
     protected function getIntentId(): string
     {
-        $intentId = $this->getInfoInstance()->getAdditionalInformation('intent_id');
-        if ($intentId === null) {
-            $response = $this->paymentIntents->getIntents();
-            $intentId = $response['id'];
-            $this->getInfoInstance()->setAdditionalInformation('intent_id', $intentId);
-        }
-        return $intentId;
+        return $this->getInfoInstance()->getAdditionalInformation('intent_id');
     }
 
     /**

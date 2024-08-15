@@ -5,16 +5,18 @@ namespace Airwallex\Payments\Model\Webhook;
 use Airwallex\Payments\Exception\WebhookException;
 use Airwallex\Payments\Helper\CancelHelper;
 use Airwallex\Payments\Model\PaymentIntentRepository;
-use Exception;
+use Airwallex\Payments\Model\Traits\HelperTrait;
+use Magento\Framework\Exception\AlreadyExistsException;
 use Magento\Framework\Exception\InputException;
 use Magento\Framework\Exception\LocalizedException;
 use Magento\Framework\Exception\NoSuchEntityException;
 use Magento\Sales\Model\Order;
 use Magento\Sales\Model\OrderRepository;
 
-class Cancel extends AbstractWebhook
+class Expire extends AbstractWebhook
 {
-    public const WEBHOOK_NAME = 'payment_intent.cancelled';
+    use HelperTrait;
+    public const WEBHOOK_NAMES = ['payment_attempt.expired'];
 
     /**
      * @var CancelHelper
@@ -41,11 +43,11 @@ class Cancel extends AbstractWebhook
      * @param object $data
      *
      * @return void
+     * @throws AlreadyExistsException
      * @throws InputException
      * @throws LocalizedException
      * @throws NoSuchEntityException
      * @throws WebhookException
-     * @throws Exception
      */
     public function execute(object $data): void
     {
@@ -56,6 +58,10 @@ class Cancel extends AbstractWebhook
             throw new WebhookException(__("Can't find order $paymentIntentId"));
         }
 
+        if (!$this->isRedirectMethodConstant($order->getPayment()->getMethod())) {
+            return;
+        }
+
         if (!$order->canCancel()) {
             if ($order->isCanceled()) return;
             throw new WebhookException(__("Can't cancel order $paymentIntentId"));
@@ -63,11 +69,7 @@ class Cancel extends AbstractWebhook
 
         $this->cancelHelper->setWebhookCanceling(true);
         $order->cancel();
-        $order->addCommentToStatusHistory(__('Order cancelled through Airwallex.'));
-        try {
-            $this->orderRepository->save($order);
-        } catch(Exception $e) {
-            throw new Exception($e->getMessage() . " intent id: $paymentIntentId order id: {$order->getIncrementId()}");
-        }
+        $order->addCommentToStatusHistory(__('Payment expired.'));
+        $this->orderRepository->save($order);
     }
 }

@@ -215,16 +215,11 @@ define(
                 const payload = {
                     cartId: utils.getCartId(),
                     paymentMethod: {
-                        method: this.code
-                    }
+                        method: this.code,
+                        additional_data: {}
+                    },
+                    from: pay
                 };
-
-                let serviceUrl = urlBuilder.build('rest/V1/airwallex/payments/guest-place-order');
-                if (utils.isLoggedIn()) {
-                    serviceUrl = urlBuilder.build('rest/V1/airwallex/payments/place-order');
-                }
-
-                payload.intent_id = null;
 
                 (new Promise(async (resolve, reject) => {
                     try {
@@ -235,7 +230,7 @@ define(
                         }
                         
                         if (this.paymentConfig.is_recaptcha_enabled) {
-                            payload.xReCaptchaValue = await utils.recaptchaToken();
+                            payload.xReCaptchaValue = await utils.getRecaptchaToken(utils.expressRecaptchaId);
                         }
 
                         if (!utils.isLoggedIn()) {
@@ -245,28 +240,36 @@ define(
                             }
                         }
 
-                        const intentResponse = await storage.post(
-                            serviceUrl, JSON.stringify(payload), true, 'application/json', {}
-                        );
+                        if (!utils.isCheckoutPage()) {
+                            if (!payload.paymentMethod.extension_attributes) {
+                                payload.paymentMethod.extension_attributes = {};
+                            }
+                            payload.paymentMethod.extension_attributes.agreement_ids = [];
+                            let agreements = this.expressData.settings.agreements;
+                            if (agreements && agreements.checkoutAgreements && agreements.checkoutAgreements.agreements && agreements.checkoutAgreements.agreements.length) {
+                                for (let item of agreements.checkoutAgreements.agreements) {
+                                    payload.paymentMethod.extension_attributes.agreement_ids.push(item.agreementId);
+                                }
+                            }
+                        }
+
+                        await utils.postPaymentInformation(payload, utils.isLoggedIn(), utils.getCartId());
+                        
+                        let intentResponse = await utils.getIntent(payload, {});
+                        if (!intentResponse) return;
 
                         const params = {};
                         params.id = intentResponse.intent_id;
                         params.client_secret = intentResponse.client_secret;
-                        params.payment_method = {};
-                        params.payment_method.billing = addressHandler.intentConfirmBillingAddressFromGoogle;
-                        if (utils.isCheckoutPage()) {
-                            addressHandler.setIntentConfirmBillingAddressFromOfficial(this.expressData.billing_address);
-                            params.payment_method.billing = addressHandler.intentConfirmBillingAddressFromOfficial;
+                        // params.payment_method = {};
+                        // let confirmBilling = pay === 'apple' ? addressHandler.intentConfirmBillingAddressFromApple : addressHandler.intentConfirmBillingAddressFromGoogle;
+                        try {
+                            await eval(pay).confirmIntent(params);
+                        } catch (error) {
+                            utils.dealConfirmException(error)
                         }
-
-                        await eval(pay).confirmIntent(params);
-
-                        payload.intent_id = intentResponse.intent_id;
-                        payload.paymentMethod.additional_data = {intent_id: intentResponse.intent_id};
-                        
-                        const endResult = await storage.post(
-                            serviceUrl, JSON.stringify(payload), true, 'application/json', {}
-                        );
+    
+                        let endResult = await utils.placeOrder(payload, intentResponse, {});
 
                         resolve(endResult);
                     } catch (e) {

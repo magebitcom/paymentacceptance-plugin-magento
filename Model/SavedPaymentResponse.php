@@ -1,18 +1,4 @@
 <?php
-/**
- * This file is part of the Airwallex Payments module.
- *
- * DISCLAIMER
- *
- * Do not edit or add to this file if you wish to upgrade
- * to newer versions in the future.
- *
- * @copyright Copyright (c) 2021 Magebit, Ltd. (https://magebit.com/)
- * @license   GNU General Public License ("GPL") v3.0
- *
- * For the full copyright and license information, please view the LICENSE
- * file that was distributed with this source code.
- */
 
 namespace Airwallex\Payments\Model;
 
@@ -24,7 +10,7 @@ class SavedPaymentResponse extends DataObject implements SavedPaymentResponseInt
     /**
      * @return string|null
      */
-    public function getId()
+    public function getId(): ?string
     {
         return $this->getData(self::DATA_KEY_ID);
     }
@@ -33,7 +19,7 @@ class SavedPaymentResponse extends DataObject implements SavedPaymentResponseInt
      * @param string|null $id
      * @return SavedPaymentResponse
      */
-    public function setId(string $id = null)
+    public function setId(string $id = null): SavedPaymentResponse
     {
         return $this->setData(self::DATA_KEY_ID, $id);
     }
@@ -41,7 +27,7 @@ class SavedPaymentResponse extends DataObject implements SavedPaymentResponseInt
     /**
      * @return string|null
      */
-    public function getCardBrand()
+    public function getCardBrand(): ?string
     {
         return $this->getData(self::DATA_KEY_CARD_BRAND);
     }
@@ -50,7 +36,7 @@ class SavedPaymentResponse extends DataObject implements SavedPaymentResponseInt
      * @param string|null $cardBrand
      * @return SavedPaymentResponse
      */
-    public function setCardBrand(string $cardBrand = null)
+    public function setCardBrand(string $cardBrand = null): SavedPaymentResponse
     {
         return $this->setData(self::DATA_KEY_CARD_BRAND, $cardBrand);
     }
@@ -58,7 +44,7 @@ class SavedPaymentResponse extends DataObject implements SavedPaymentResponseInt
     /**
      * @return string|null
      */
-    public function getCardExpiryMonth()
+    public function getCardExpiryMonth(): ?string
     {
         return $this->getData(self::DATA_KEY_CARD_EXPIRY_MONTH);
     }
@@ -67,7 +53,7 @@ class SavedPaymentResponse extends DataObject implements SavedPaymentResponseInt
      * @param string|null $expiryMonth
      * @return SavedPaymentResponse
      */
-    public function setCardExpiryMonth(string $expiryMonth = null)
+    public function setCardExpiryMonth(string $expiryMonth = null): SavedPaymentResponse
     {
         return $this->setData(self::DATA_KEY_CARD_EXPIRY_MONTH, $expiryMonth);
     }
@@ -75,7 +61,7 @@ class SavedPaymentResponse extends DataObject implements SavedPaymentResponseInt
     /**
      * @return string|null
      */
-    public function getCardExpiryYear()
+    public function getCardExpiryYear(): ?string
     {
         return $this->getData(self::DATA_KEY_CARD_EXPIRY_YEAR);
     }
@@ -84,7 +70,7 @@ class SavedPaymentResponse extends DataObject implements SavedPaymentResponseInt
      * @param string|null $expiryYear
      * @return SavedPaymentResponse
      */
-    public function setCardExpiryYear(string $expiryYear = null)
+    public function setCardExpiryYear(string $expiryYear = null): SavedPaymentResponse
     {
         return $this->setData(self::DATA_KEY_CARD_EXPIRY_YEAR, $expiryYear);
     }
@@ -92,7 +78,7 @@ class SavedPaymentResponse extends DataObject implements SavedPaymentResponseInt
     /**
      * @return string|null
      */
-    public function getCardLastFour()
+    public function getCardLastFour(): ?string
     {
         return $this->getData(self::DATA_KEY_CARD_LAST_FOUR);
     }
@@ -101,7 +87,7 @@ class SavedPaymentResponse extends DataObject implements SavedPaymentResponseInt
      * @param string|null $lastFour
      * @return SavedPaymentResponse
      */
-    public function setCardLastFour(string $lastFour = null)
+    public function setCardLastFour(string $lastFour = null): SavedPaymentResponse
     {
         return $this->setData(self::DATA_KEY_CARD_LAST_FOUR, $lastFour);
     }
@@ -109,7 +95,7 @@ class SavedPaymentResponse extends DataObject implements SavedPaymentResponseInt
     /**
      * @return string|null
      */
-    public function getCardHolderName()
+    public function getCardHolderName(): ?string
     {
         return $this->getData(self::DATA_KEY_CARD_HOLDER_NAME);
     }
@@ -118,7 +104,7 @@ class SavedPaymentResponse extends DataObject implements SavedPaymentResponseInt
      * @param string|null $holderName
      * @return SavedPaymentResponse
      */
-    public function setCardHolderName(string $holderName = null)
+    public function setCardHolderName(string $holderName = null): SavedPaymentResponse
     {
         return $this->setData(self::DATA_KEY_CARD_HOLDER_NAME, $holderName);
     }
@@ -126,7 +112,7 @@ class SavedPaymentResponse extends DataObject implements SavedPaymentResponseInt
     /**
      * @return string|null
      */
-    public function getCardIcon()
+    public function getCardIcon(): ?string
     {
         return $this->getData(self::DATA_KEY_CARD_ICON);
     }
@@ -135,8 +121,76 @@ class SavedPaymentResponse extends DataObject implements SavedPaymentResponseInt
      * @param string|null $icon
      * @return SavedPaymentResponse
      */
-    public function setCardIcon(string $icon = null)
+    public function setCardIcon(string $icon = null): SavedPaymentResponse
     {
         return $this->setData(self::DATA_KEY_CARD_ICON, $icon);
+    }
+
+    /**
+     * @return string|null
+     */
+    public function getNextTriggeredBy(): ?string
+    {
+        return $this->getData(self::DATA_KEY_NEXT_TRIGGERED_BY);
+    }
+
+    /**
+     * @param string|null $nextTriggeredBy
+     * @return $this
+     */
+    public function setNextTriggeredBy(string $nextTriggeredBy = null): SavedPaymentResponse
+    {
+        return $this->setData(self::DATA_KEY_NEXT_TRIGGERED_BY, $nextTriggeredBy);
+    }
+
+    /**
+     * @return string|null
+     */
+    public function getNumberType(): ?string
+    {
+        return $this->getData(self::DATA_KEY_NUMBER_TYPE);
+    }
+
+    /**
+     * @param string|null $numberType
+     * @return $this
+     */
+    public function setNumberType(string $numberType = null): SavedPaymentResponse
+    {
+        return $this->setData(self::DATA_KEY_NUMBER_TYPE, $numberType);
+    }
+
+    /**
+     * @return string|null
+     */
+    public function getStatus(): ?string
+    {
+        return $this->getData(self::DATA_STATUS);
+    }
+
+    /**
+     * @param string|null $status
+     * @return $this
+     */
+    public function setStatus(string $status = null): SavedPaymentResponse
+    {
+        return $this->setData(self::DATA_STATUS, $status);
+    }
+
+    /**
+     * @return string|null
+     */
+    public function getBilling(): ?string
+    {
+        return $this->getData(self::DATA_BILLING);
+    }
+
+    /**
+     * @param string|null $billing
+     * @return $this
+     */
+    public function setBilling(string $billing = null): SavedPaymentResponse
+    {
+        return $this->setData(self::DATA_BILLING, $billing);
     }
 }

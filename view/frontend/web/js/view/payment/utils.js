@@ -1,22 +1,32 @@
 define([
     'mage/url',
     'jquery',
+    'mage/storage',
     'Magento_Customer/js/model/authentication-popup',
     'Magento_Ui/js/modal/modal',
     'Airwallex_Payments/js/view/payment/recaptcha/webapiReCaptcha',
     'Airwallex_Payments/js/view/payment/recaptcha/webapiReCaptchaRegistry',
     'Magento_Customer/js/customer-data',
     'Magento_Ui/js/modal/alert',
+    'Magento_Customer/js/model/customer',
+    'Magento_Checkout/js/model/payment/place-order-hooks',
+    'Airwallex_Payments/js/view/payment/method-renderer/address/address-handler',
+    'Magento_CheckoutAgreements/js/model/agreement-validator',
     'Magento_Checkout/js/model/error-processor'
 ], function (
     urlBuilder,
     $,
+    storage,
     popup,
     modal,
     webapiReCaptcha,
     webapiRecaptchaRegistry,
     customerData,
     alert,
+    customer,
+    placeOrderHooks,
+    addressHandler,
+    agreementValidator,
     errorProcessor
 ) {
     'use strict';
@@ -27,18 +37,21 @@ define([
         cartPageIdentitySelector: '.cart-summary',
         checkoutPageIdentitySelector: '#co-payment-form',
         buttonMaskSelector: '.aws-button-mask',
+        buttonMaskAgreementSelector: '.aws-button-mask-for-agreement',
         buttonMaskSelectorForLogin: '.aws-button-mask-for-login',
         expressData: {},
         paymentConfig: {},
         recaptchaSelector: '.airwallex-recaptcha',
         recaptchaId: 'recaptcha-checkout-place-order',
+        expressRecaptchaId: 'express-recaptcha-checkout-place-order',
+        agreementSelector: '.airwallex-express-checkout .checkout-agreements input[type="checkbox"]',
 
         getRecaptchaId() {
             let id = $('.airwallex-card-container .g-recaptcha').attr('id');
             if (id) {
                 return id;
             }
-            if ($('#recaptcha-checkout-place-order').length) {
+            if ($('#' + this.recaptchaId).length) {
                 return this.recaptchaId;
             }
             return '';
@@ -117,7 +130,68 @@ define([
             }
         },
 
+        validateAgreements: function (selector) {
+            var checkoutConfig = window.checkoutConfig,
+            agreementsConfig = checkoutConfig ? checkoutConfig.checkoutAgreements : {};
+    
+            var isValid = true;
+
+            if (!agreementsConfig.isEnabled || $(selector).length === 0) {
+                return true;
+            }
+
+            $(selector).each(function (index, element) {
+                if (!$.validator.validateSingleElement(element, {
+                    errorElement: 'div',
+                    hideError: false
+                })) {
+                    isValid = false;
+                }
+            });
+
+            return isValid;
+        },
+
+        checkAgreements() {
+            if (this.allAgreementsCheck()) {
+                $(this.buttonMaskAgreementSelector).hide();
+            } else {
+                $(this.buttonMaskAgreementSelector).show();
+            }
+        },
+
+        allAgreementsCheck() {
+            let status = true;
+            $(this.agreementSelector).each(function() {
+                if (!this.checked) {
+                    status = false;
+                    return false; 
+                }
+            });
+            return status;
+        },
+
+        initCheckoutPageExpressCheckoutAgreement() {
+            if (this.isCheckoutPage()) {
+                let agreementsConfig = window.checkoutConfig.checkoutAgreements || {};
+                if (!agreementsConfig.isEnabled || $(this.agreementSelector).length === 0) {
+                    $(this.buttonMaskAgreementSelector).hide();
+                    return;
+                }
+                this.checkAgreements();
+                $(this.agreementSelector).off('change.awx').on('change.awx', () => {
+                    this.checkAgreements();
+                });
+                $(this.buttonMaskAgreementSelector).off('click.awx').on('click.awx', (e) => {
+                    e.stopPropagation();
+                    this.checkAgreements();
+                    this.validateAgreements(this.agreementSelector)
+                });
+            }
+        },
+
         initCheckoutPageExpressCheckoutClick() {
+            this.initCheckoutPageExpressCheckoutAgreement();
             if (this.isCheckoutPage() && !this.isLoggedIn() && this.expressData.is_virtual) {
                 this.checkGuestEmailInput();
                 $(this.guestEmailSelector).off('input.awx').on('input.awx', () => {
@@ -163,11 +237,11 @@ define([
                 return;
             }
 
-            if (this.paymentConfig.is_recaptcha_enabled && !$('#recaptcha-checkout-place-order').length) {
+            if (this.paymentConfig.is_recaptcha_enabled && !$('#' + this.expressRecaptchaId).length) {
                 window.isShowAwxGrecaptcha = true;
                 isShowRecaptcha(true);
                 let re = webapiReCaptcha();
-                re.reCaptchaId = this.recaptchaId;
+                re.reCaptchaId = this.expressRecaptchaId;
                 re.settings = this.paymentConfig.recaptcha_settings;
                 re.renderReCaptcha();
                 $(this.recaptchaSelector).css({
@@ -175,15 +249,6 @@ define([
                     'position': 'absolute'
                 });
             }
-        },
-
-        async recaptchaToken() {
-            return await new Promise((resolve) => {
-                webapiRecaptchaRegistry.addListener(this.recaptchaId, (token) => {
-                    resolve(token);
-                });
-                webapiRecaptchaRegistry.triggers[this.recaptchaId]();
-            });
         },
 
         isSetActiveInProductPage() {
@@ -213,6 +278,16 @@ define([
             }
             return this.isRequireShippingAddress();
         },
+
+        async getSavedCards() {
+            let url = urlBuilder.build('rest/V1/airwallex/saved_cards');
+            return await storage.get(url, undefined, 'application/json', {});
+        },
+
+        async getRegionId(country, region) {
+            let url = urlBuilder.build('rest/V1/airwallex/region_id?country=' + country + '&region=' + region);
+            return await storage.get(url, undefined, 'application/json', {});
+        },        
 
         isRequireShippingAddress() {
             if (this.isProductPage()) {
@@ -268,13 +343,9 @@ define([
             return this.isLoggedIn() ? this.expressData.cart_id : this.expressData.mask_cart_id;
         },
 
-        isLoggedIn() {
-            return !!this.expressData.customer_id;
-        },
-
         error(response) {
             let modalSelector = $('#awx-modal');
-            modal({title: 'Error'}, modalSelector);
+            modal({ title: 'Error' }, modalSelector);
 
             $('body').trigger('processStop');
             let errorMessage = $.mage.__(response.message);
@@ -289,8 +360,11 @@ define([
             modalSelector.modal('openModal');
         },
 
+        redirectToSuccess() {
+            window.location.replace(urlBuilder.build('checkout/onepage/success/'));
+        },
+
         processPlaceOrderError: function (response) {
-            $('body').trigger('processStop');
             if (response && response.getResponseHeader) {
                 errorProcessor.process(response, this.messageContainer);
                 const redirectURL = response.getResponseHeader('errorRedirectAction');
@@ -303,6 +377,246 @@ define([
             } else if (response && response.message) {
                 this.validationError(response.message);
             }
+
+            $('body').trigger('processStop');
         },
+
+        isLoggedIn() {
+            if (window.checkoutConfig) {
+                return customer.isLoggedIn();
+            }
+            return !!this.expressData.customer_id;
+        },
+
+        placeOrderUrl() {
+            let serviceUrl = urlBuilder.build('rest/V1/airwallex/payments/guest-place-order');
+            if (this.isLoggedIn()) {
+                serviceUrl = urlBuilder.build('rest/V1/airwallex/payments/place-order');
+            }
+            return serviceUrl;
+        },
+
+        async getIntent(payload, headers = {}) {
+            if (!this.isLoggedIn()) {
+                if (!payload.email) {
+                    throw new Error('Email is required!');
+                }
+            }
+            if (!payload.paymentMethod || !payload.paymentMethod.method || !payload.paymentMethod.additional_data) {
+                throw new Error('Payment method is required!');
+            }
+            if (!payload.cartId) {
+                throw new Error('Cart ID is required!');
+            }
+            let intentResponse = {};
+            try {
+                intentResponse = await storage.post(
+                    this.placeOrderUrl(), JSON.stringify(payload), true, 'application/json', headers
+                );
+            } catch (e) {
+                if (e.status === 404) {
+                    this.clearDataAfterPay({}, customerData)
+                    this.redirectToSuccess();
+                    return;
+                }
+                throw e;
+            }
+            if (intentResponse.response_type === 'error') {
+                throw new Error(intentResponse.message);
+            }
+            return intentResponse;
+        },
+
+        async placeOrder(payload, intentResponse, headers = {}) {
+            payload.intent_id = intentResponse.intent_id;
+            payload.paymentMethod.additional_data.intent_id = intentResponse.intent_id;
+
+            let endResult = {};
+            try {
+                endResult = await storage.post(
+                    this.placeOrderUrl(), JSON.stringify(payload), true, 'application/json', headers
+                );
+            } catch (e) {
+                if (e.status === 404) {
+                    this.clearDataAfterPay({}, customerData)
+                    this.redirectToSuccess();
+                    return;
+                }
+                throw e;
+            }
+
+            if (endResult.response_type === 'error') {
+                throw new Error(endResult.message);
+            }
+            return endResult;
+        },
+
+        dealConfirmException(error) {
+            if (error.code !== 'invalid_status_for_operation') {
+                throw error;
+            }
+        },
+
+        async getRecaptchaToken(id) {
+            return await new Promise((resolve, reject) => {
+                webapiRecaptchaRegistry.tokens = {};
+                webapiRecaptchaRegistry.addListener(id, (token) => {
+                    resolve(token);
+                });
+                webapiRecaptchaRegistry.triggers[id]();
+            });
+        },
+
+        getAgreementIds() {
+            let agreementForm = $('.payment-method._active div[data-role=checkout-agreements] input');
+            let agreementData = agreementForm.serializeArray();
+            let agreementIds = [];
+    
+            agreementData.forEach(function (item) {
+                agreementIds.push(item.value);
+            });
+            return agreementIds;
+        },
+
+        postPaymentInformation(payload, isLoggedIn, cartId) {
+            let url = 'rest/V1/carts/mine/set-payment-information';
+            if (!isLoggedIn) {
+                url = 'rest/V1/guest-carts/' + cartId + '/set-payment-information';
+            }
+            return storage.post(
+                urlBuilder.build(url), JSON.stringify(payload), undefined, 'application/json', {}
+            );
+        },
+
+        pay(self, from, quote) {
+            let that = this;
+            $('body').trigger('processStart');
+
+            let cartId = quote.getQuoteId();
+            const payload = {
+                cartId: cartId,
+                from: from,
+                paymentMethod: {
+                    method: 'airwallex_payments_card',
+                    additional_data: {},
+                    extension_attributes: {
+                        'agreement_ids': this.getAgreementIds()
+                    },
+                },
+            };
+
+            if (from !== 'vault') {
+                payload.billingAddress = quote.billingAddress();
+            }
+
+            if (!this.isLoggedIn()) {
+                payload.email = quote.guestEmail;
+            }
+
+            let headers = {};
+            _.each(placeOrderHooks.requestModifiers, function (modifier) {
+                modifier(headers, payload);
+            });
+
+            payload.intent_id = null;
+
+            (new Promise(async function (resolve, reject) {
+                try {
+                    if (self.isRecaptchaEnabled) {
+                        let recaptchaRegistry = require('Magento_ReCaptchaWebapiUi/js/webapiReCaptchaRegistry');
+
+                        if (recaptchaRegistry) {
+                            payload.xReCaptchaValue = await new Promise((resolve, reject) => {
+                                recaptchaRegistry.tokens = {};
+                                recaptchaRegistry.addListener(that.getRecaptchaId(), (token) => {
+                                    resolve(token);
+                                });
+                                recaptchaRegistry.triggers[that.getRecaptchaId()]();
+                            });
+                        }
+                        // payload.xReCaptchaValue = await that.getRecaptchaToken(that.getRecaptchaId());
+                    }
+
+                    let intentResponse = await that.getIntent(payload, headers);
+                    if (!intentResponse) return;
+
+                    let response = {};
+                    try {
+                        if (from === 'vault') {
+                            const selectedConsentId = $("#v-" + $('input[name="payment[method]"]:checked').val()).val();
+                            response = await Airwallex.confirmPaymentIntent({
+                                intent_id: intentResponse.intent_id,
+                                client_secret: intentResponse.client_secret,
+                                payment_consent_id: selectedConsentId,
+                                element: self.cvcElement,
+                                payment_method: {
+                                    billing: self.getBillingInformation()
+                                },
+                                payment_method_options: {
+                                    card: {
+                                        auto_capture: self.autoCapture
+                                    }
+                                },
+                            });
+                        } else {
+                            if (self.isSaveCardSelected() && self.getCustomerId()) {
+                                payload.from = 'card_with_saved';
+                                response = await Airwallex.createPaymentConsent({
+                                    intent_id: intentResponse.intent_id,
+                                    customer_id: self.getCustomerId(),
+                                    client_secret: intentResponse.client_secret,
+                                    currency: quote.totals().quote_currency_code,
+                                    billing: self.getBillingInformation(),
+                                    element: self.cardElement,
+                                    next_triggered_by: 'customer',
+                                });
+                            } else {
+                                response = await Airwallex.confirmPaymentIntent({
+                                    intent_id: intentResponse.intent_id,
+                                    client_secret: intentResponse.client_secret,
+                                    payment_method: {
+                                        billing: self.getBillingInformation()
+                                    },
+                                    element: self.cardElement
+                                });
+                            }
+                        }
+                    } catch (error) {
+                        that.dealConfirmException(error);
+                    }
+                    // 200 "status": "REQUIRES_CAPTURE",
+                    // 400 code: "invalid_status_for_operation"
+                    // if (from !== 'vault') {
+                    //     payload.billingAddress = quote.billingAddress();
+                    // }
+
+                    // setTimeout(async () => {
+                    //     let endResult = await that.placeOrder(payload, intentResponse, headers);
+                    //     resolve(endResult);
+                    // }, 20000);
+                    let endResult = await that.placeOrder(payload, intentResponse, headers);
+                    resolve(endResult);
+
+                } catch (e) {
+                    reject(e);
+                }
+            })).then(function (response) {
+                that.clearDataAfterPay(response, customerData)
+                that.redirectToSuccess();
+                return;
+            }).catch(
+                that.processPlaceOrderError.bind(self)
+            ).finally(
+                function () {
+                    _.each(placeOrderHooks.afterRequestListeners, function (listener) {
+                        listener();
+                    });
+
+                    if (self.isPlaceOrderActionAllowed) {
+                        self.isPlaceOrderActionAllowed(true);
+                    }
+                }
+            );
+        }
     };
 });

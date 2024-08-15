@@ -1,18 +1,4 @@
 <?php
-/**
- * This file is part of the Airwallex Payments module.
- *
- * DISCLAIMER
- *
- * Do not edit or add to this file if you wish to upgrade
- * to newer versions in the future.
- *
- * @copyright Copyright (c) 2021 Magebit, Ltd. (https://magebit.com/)
- * @license   GNU General Public License ("GPL") v3.0
- *
- * For the full copyright and license information, please view the LICENSE
- * file that was distributed with this source code.
- */
 
 namespace Airwallex\Payments\Api\Data;
 
@@ -25,6 +11,10 @@ interface SavedPaymentResponseInterface
     public const DATA_KEY_CARD_LAST_FOUR = 'card_last_four';
     public const DATA_KEY_CARD_HOLDER_NAME = 'card_holder_name';
     public const DATA_KEY_CARD_ICON = 'card_icon';
+    public const DATA_KEY_NEXT_TRIGGERED_BY = 'next_triggered_by';
+    public const DATA_KEY_NUMBER_TYPE = 'number_type';
+    public const DATA_STATUS = 'status';
+    public const DATA_BILLING = 'billing';
 
     /**
      * @return string|null
@@ -102,4 +92,48 @@ interface SavedPaymentResponseInterface
      * @return string|null
      */
     public function getCardIcon();
+
+    /**
+     * @return string|null
+     */
+    public function getNextTriggeredBy();
+
+    /**
+     * @param string|null $nextTriggeredBy
+     * @return $this
+     */
+    public function setNextTriggeredBy(string $nextTriggeredBy = null);
+
+    /**
+     * @return string|null
+     */
+    public function getNumberType();
+
+    /**
+     * @param string|null $numberType
+     * @return $this
+     */
+    public function setNumberType(string $numberType = null);
+
+    /**
+     * @return string|null
+     */
+    public function getStatus();
+
+    /**
+     * @param string|null $status
+     * @return $this
+     */
+    public function setStatus(string $status = null);
+
+    /**
+     * @return string|null
+     */
+    public function getBilling();
+
+    /**
+     * @param string|null $billing
+     * @return $this
+     */
+    public function setBilling(string $billing = null);
 }

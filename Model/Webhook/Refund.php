@@ -1,18 +1,5 @@
 <?php
-/**
- * This file is part of the Airwallex Payments module.
- *
- * DISCLAIMER
- *
- * Do not edit or add to this file if you wish to upgrade
- * to newer versions in the future.
- *
- * @copyright Copyright (c) 2021 Magebit, Ltd. (https://magebit.com/)
- * @license   GNU General Public License ("GPL") v3.0
- *
- * For the full copyright and license information, please view the LICENSE
- * file that was distributed with this source code.
- */
+
 namespace Airwallex\Payments\Model\Webhook;
 
 use Airwallex\Payments\Exception\WebhookException;
@@ -26,6 +13,7 @@ use Magento\Sales\Model\Order\CreditmemoFactory;
 use Magento\Sales\Model\OrderRepository;
 use Magento\Sales\Model\Service\CreditmemoService;
 use Airwallex\Payments\Model\Traits\HelperTrait;
+use Magento\Framework\App\CacheInterface;
 
 class Refund extends AbstractWebhook
 {
@@ -44,22 +32,30 @@ class Refund extends AbstractWebhook
     private CreditmemoService $creditmemoService;
 
     /**
+     * @var CacheInterface
+     */
+    private CacheInterface $cache;
+
+    /**
      * Refund constructor.
      *
      * @param OrderRepository $orderRepository
      * @param PaymentIntentRepository $paymentIntentRepository
      * @param CreditmemoFactory $creditmemoFactory
      * @param CreditmemoService $creditmemoService
+     * @param CacheInterface $cache
      */
     public function __construct(
         OrderRepository $orderRepository,
         PaymentIntentRepository $paymentIntentRepository,
         CreditmemoFactory $creditmemoFactory,
-        CreditmemoService $creditmemoService
+        CreditmemoService $creditmemoService,
+        CacheInterface $cache
     ) {
         parent::__construct($orderRepository, $paymentIntentRepository);
         $this->creditmemoFactory = $creditmemoFactory;
         $this->creditmemoService = $creditmemoService;
+        $this->cache = $cache;
     }
 
     /**
@@ -74,10 +70,25 @@ class Refund extends AbstractWebhook
      */
     public function execute(object $data): void
     {
-        $order = $this->paymentIntentRepository->getOrder($data->payment_intent_id);
+        $paymentIntentId = $data->payment_intent_id;
 
-        if ($order === null) {
+        /** @var Order $order */
+        $order = $this->paymentIntentRepository->getOrder($paymentIntentId);
+        if (!$order) {
             throw new WebhookException(__('Can\'t find order'));
+        }
+
+        $cacheName = $this->refundCacheName($paymentIntentId);
+        if ($this->cache->load($cacheName)) {
+            $this->cache->remove($cacheName);
+            return;
+        }
+
+        $record = $this->paymentIntentRepository->getByIntentId($paymentIntentId);
+        $detail = $record->getDetail();
+        $detailArray = $detail ? json_decode($detail, true) : [];
+        if (!empty($detailArray['refund_ids']) && in_array($data->id, $detailArray['refund_ids'], true)) {
+            return;
         }
 
         if ($order->getState() === Order::STATE_HOLDED && $order->canUnhold()) {
@@ -93,7 +104,7 @@ class Refund extends AbstractWebhook
             return;
         }
 
-        $this->createCreditMemo($order, $data->amount, $data->reason);
+        $this->createCreditMemo($order, $data->amount, $data->reason ?? '');
     }
 
     /**
@@ -108,7 +119,7 @@ class Refund extends AbstractWebhook
     {
         $invoice = $order->getInvoiceCollection()->getFirstItem();
 
-        if ($invoice === null) {
+        if (!$invoice) {
             return;
         }
 
@@ -122,11 +133,18 @@ class Refund extends AbstractWebhook
             $creditMemo->setAdjustmentPositive($diff);
         }
 
-        $creditMemo->setBaseGrandTotal($this->convertToDisplayCurrency($refundAmount, $order->getBaseToOrderRate(), true));
+        $baseAmount = $this->getBaseAmount($refundAmount, $order->getBaseToOrderRate(), $order->getGrandTotal(), $order->getBaseGrandTotal());
+        $remained = round($order->getBaseTotalPaid() - $order->getBaseTotalRefunded(), 4);
+
+        if ($baseAmount - $remained >= 0.0001) {
+            $baseAmount = $remained;
+        }
+
+        $creditMemo->setBaseGrandTotal($baseAmount);
         $creditMemo->setGrandTotal($refundAmount);
 
         $this->creditmemoService->refund($creditMemo, true);
-        $order->addCommentToStatusHistory(__('Order refunded through Airwallex, Reason: %1', $reason));
+        $order->addCommentToStatusHistory(__('Order refunded through Airwallex.'));
         $this->orderRepository->save($order);
     }
 }

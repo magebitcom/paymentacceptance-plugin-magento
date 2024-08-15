@@ -1,18 +1,5 @@
 <?php
-/**
- * This file is part of the Airwallex Payments module.
- *
- * DISCLAIMER
- *
- * Do not edit or add to this file if you wish to upgrade
- * to newer versions in the future.
- *
- * @copyright Copyright (c) 2021 Magebit, Ltd. (https://magebit.com/)
- * @license   GNU General Public License ("GPL") v3.0
- *
- * For the full copyright and license information, please view the LICENSE
- * file that was distributed with this source code.
- */
+
 namespace Airwallex\Payments\Model\Client\Request\PaymentConsent;
 
 use Airwallex\Payments\Api\Data\SavedPaymentResponseInterface;
@@ -29,6 +16,7 @@ use Magento\Framework\Module\ModuleListInterface;
 use Psr\Http\Message\ResponseInterface;
 use Magento\Framework\App\ProductMetadataInterface;
 use Magento\Framework\App\CacheInterface;
+use Magento\Checkout\Helper\Data as CheckoutData;
 
 class GetList extends AbstractClient implements BearerAuthenticationInterface
 {
@@ -39,6 +27,7 @@ class GetList extends AbstractClient implements BearerAuthenticationInterface
 
     private SavedPaymentResponseInterfaceFactory $savedPaymentResponseFactory;
     private AvailablePaymentMethodsHelper $availablePaymentMethodsHelper;
+    protected CheckoutData $checkoutData;
 
     public function __construct(
         AuthenticationHelper $authenticationHelper,
@@ -48,10 +37,11 @@ class GetList extends AbstractClient implements BearerAuthenticationInterface
         ModuleListInterface $moduleList,
         ProductMetadataInterface $productMetada,
         SavedPaymentResponseInterfaceFactory $savedPaymentResponseFactory,
+        CheckoutData $checkoutData,
         CacheInterface $cache,
         AvailablePaymentMethodsHelper $availablePaymentMethodsHelper
     ) {
-        parent::__construct($authenticationHelper, $identityService, $requestLogger, $configuration, $productMetada, $moduleList, $cache);
+        parent::__construct($authenticationHelper, $identityService, $requestLogger, $configuration, $productMetada, $moduleList, $checkoutData, $cache);
         $this->savedPaymentResponseFactory = $savedPaymentResponseFactory;
         $this->availablePaymentMethodsHelper = $availablePaymentMethodsHelper;
     }
@@ -150,10 +140,6 @@ class GetList extends AbstractClient implements BearerAuthenticationInterface
                 continue;
             }
 
-            if ($item->status === 'DISABLED') {
-                continue;
-            }
-
             $cards = [];
             foreach($this->getCardSchemes() as $scheme) {
                 $cards[$scheme['name']] = $scheme;
@@ -165,19 +151,30 @@ class GetList extends AbstractClient implements BearerAuthenticationInterface
 
             /** @var SavedPaymentResponse $result */
             $savedPayment = $this->savedPaymentResponseFactory->create();
+            $billing = '';
+            if (!empty($item->payment_method->card->billing)) {
+                $billing = json_encode((array)$item->payment_method->card->billing);
+            }
             $savedPayment->setData([
                 SavedPaymentResponseInterface::DATA_KEY_ID => $item->id,
-                SavedPaymentResponseInterface::DATA_KEY_CARD_BRAND => $cards[$iconIndex]['display_name'],
+                SavedPaymentResponseInterface::DATA_KEY_CARD_BRAND => $iconIndex,
                 SavedPaymentResponseInterface::DATA_KEY_CARD_EXPIRY_MONTH => $item->payment_method->card->expiry_month,
                 SavedPaymentResponseInterface::DATA_KEY_CARD_EXPIRY_YEAR => $item->payment_method->card->expiry_year,
                 SavedPaymentResponseInterface::DATA_KEY_CARD_LAST_FOUR => $item->payment_method->card->last4,
                 SavedPaymentResponseInterface::DATA_KEY_CARD_HOLDER_NAME => $item->payment_method->card->name,
-                SavedPaymentResponseInterface::DATA_KEY_CARD_ICON => $cards[$iconIndex]['resources']['logos']['png'] ?? ''
+                SavedPaymentResponseInterface::DATA_KEY_NEXT_TRIGGERED_BY => $item->next_triggered_by ?? '',
+                SavedPaymentResponseInterface::DATA_KEY_NUMBER_TYPE => $item->payment_method->card->number_type ?? '',
+                SavedPaymentResponseInterface::DATA_KEY_CARD_ICON => $cards[$iconIndex]['resources']['logos']['png'] ?? '',
+                SavedPaymentResponseInterface::DATA_STATUS => $item->status,
+                SavedPaymentResponseInterface::DATA_BILLING => $billing
             ]);
 
             $result[] = $savedPayment;
         }
 
-        return $result;
+        return [
+            'has_more' => $request->has_more,
+            'items' => $result,
+        ];
     }
 }

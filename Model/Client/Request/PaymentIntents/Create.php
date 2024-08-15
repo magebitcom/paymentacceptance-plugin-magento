@@ -1,26 +1,11 @@
 <?php
-/**
- * This file is part of the Airwallex Payments module.
- *
- * DISCLAIMER
- *
- * Do not edit or add to this file if you wish to upgrade
- * to newer versions in the future.
- *
- * @copyright Copyright (c) 2021 Magebit, Ltd. (https://magebit.com/)
- * @license   GNU General Public License ('GPL') v3.0
- *
- * For the full copyright and license information, please view the LICENSE
- * file that was distributed with this source code.
- */
+
 namespace Airwallex\Payments\Model\Client\Request\PaymentIntents;
 
 use Airwallex\Payments\Model\Client\AbstractClient;
 use Airwallex\Payments\Model\Client\Interfaces\BearerAuthenticationInterface;
-use Airwallex\Payments\Model\PaymentConsents;
 use JsonException;
 use Magento\Quote\Model\Quote;
-use Magento\Quote\Model\Quote\Item;
 use Psr\Http\Message\ResponseInterface;
 
 class Create extends AbstractClient implements BearerAuthenticationInterface
@@ -33,8 +18,6 @@ class Create extends AbstractClient implements BearerAuthenticationInterface
      */
     public function setQuote(Quote $quote, string $returnUrl): self
     {
-        $customer = $quote->getCustomer();
-
         $params = [
             'amount' => $quote->getGrandTotal(),
             'currency' => $quote->getQuoteCurrencyCode(),
@@ -42,19 +25,20 @@ class Create extends AbstractClient implements BearerAuthenticationInterface
             'supplementary_amount' => 1,
             'return_url' => $returnUrl,
             'order' => [
-                'products' => array_values(array_filter($this->getQuoteProducts($quote))),
+                'products' => $this->getQuoteProducts($quote),
                 'shipping' => $this->getShippingAddress($quote)
             ]
         ];
-
-        if ($customer
-            && $airwallexCustomerIdAttr = $customer->getCustomAttribute(PaymentConsents::KEY_AIRWALLEX_CUSTOMER_ID)) {
-            if ($airwallexCustomerIdAttr->getValue()) {
-                $params['customer_id'] = $airwallexCustomerIdAttr->getValue();
-            }
-        }
-
         return $this->setParams($params);
+    }
+
+    /**
+     * @return $this
+     */
+    public function setAirwallexCustomerId(string $id)
+    {
+        if (empty($id)) return $this;
+        return $this->setParam('customer_id', $id);
     }
 
     /**
@@ -86,7 +70,7 @@ class Create extends AbstractClient implements BearerAuthenticationInterface
      *
      * @return array|null
      */
-    private function getShippingAddress(Quote $quote): ?array
+    public function getShippingAddress(Quote $quote): ?array
     {
         $shippingAddress = $quote->getShippingAddress();
 
@@ -95,7 +79,7 @@ class Create extends AbstractClient implements BearerAuthenticationInterface
         }
 
         return [
-            'fist_name' => $shippingAddress->getName(),
+            'first_name' => $shippingAddress->getFirstname(),
             'last_name' => $shippingAddress->getLastname(),
             'phone_number' => $shippingAddress->getTelephone(),
             'shipping_method' => $shippingAddress->getShippingMethod(),
@@ -104,7 +88,30 @@ class Create extends AbstractClient implements BearerAuthenticationInterface
                 'country_code' => $shippingAddress->getCountryId(),
                 'postcode' => $shippingAddress->getPostcode(),
                 'state' => $shippingAddress->getRegion(),
-                'street' => current($shippingAddress->getStreet()),
+                'street' => implode(', ', $shippingAddress->getStreet()),
+            ]
+        ];
+    }
+
+    /**
+     * @param Quote $quote
+     *
+     * @return array|null
+     */
+    public function getBillingAddress(Quote $quote): ?array
+    {
+        $billingAddress = $quote->getBillingAddress();
+
+        return [
+            'first_name' => $billingAddress->getFirstname(),
+            'last_name' => $billingAddress->getLastname(),
+            'phone_number' => $billingAddress->getTelephone(),
+            'address' => [
+                'city' => $billingAddress->getCity(),
+                'country_code' => $billingAddress->getCountryId(),
+                'postcode' => $billingAddress->getPostcode(),
+                'state' => $billingAddress->getRegion(),
+                'street' => implode(', ', $billingAddress->getStreet()),
             ]
         ];
     }
@@ -114,26 +121,21 @@ class Create extends AbstractClient implements BearerAuthenticationInterface
      *
      * @return array
      */
-    private function getQuoteProducts(Quote $quote): array
+    public function getQuoteProducts(Quote $quote): array
     {
-        return array_map(static function (Item $item) {
-            if ((float) $item->getPrice() === 0.0) {
-                return null;
-            }
-
-            $child = $item->getChildren();
-            $child = $child ? current($child) : null;
-            $name = $child ? $child->getName() : $item->getName();
-
-            return [
-                'code' => $item->getSku(),
-                'desc' => $name,
-                'name' => $name,
-                'quantity' => $item->getQty(),
-                'sku' => $item->getSku(),
+        $products = [];
+        foreach ($quote->getAllItems() as $item) {
+            $product = $item->getProduct();
+            $products[] = [
+                'code' => $product ? $product->getId() : '',
+                'name' => $item->getName() ?: '',
+                'quantity' => intval($item->getQty()),
+                'sku' => $item->getSku() ?: '',
                 'unit_price' => $item->getConvertedPrice(),
-                'url' => $item->getProduct()->getProductUrl()
+                'url' => $product ? $product->getProductUrl() : '',
+                'type' => $product ? $product->getTypeId() : '',
             ];
-        }, $quote->getAllItems());
+        }
+        return $products;
     }
 }

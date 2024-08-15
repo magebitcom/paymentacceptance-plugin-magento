@@ -36,6 +36,7 @@ use Magento\Framework\Api\SearchCriteriaBuilder;
 class PaymentConsents implements PaymentConsentsInterface
 {
     public const CUSTOMER_ID_PREFIX = 'magento_';
+    public const STATUS_VERIFIED = 'VERIFIED';
 
     public const KEY_AIRWALLEX_CUSTOMER_ID = 'airwallex_customer_id';
 
@@ -45,7 +46,7 @@ class PaymentConsents implements PaymentConsentsInterface
     private Disable $disablePaymentConsent;
     private Retrieve $retrievePaymentConsent;
     private EavSetupFactory $eavSetupFactory;
-    private EncryptorInterface $encrypter;
+    private EncryptorInterface $encryptor;
     private PaymentTokenRepositoryInterface $tokenRepository;
     private PaymentTokenFactoryInterface $tokenFactory;
     private StoreManagerInterface $storeManager;
@@ -57,30 +58,31 @@ class PaymentConsents implements PaymentConsentsInterface
     protected SearchCriteriaBuilder $searchCriteriaBuilder;
 
     public function __construct(
-        CreateCustomer $createCustomer,
-        GetList $paymentConsentList,
-        Disable $disablePaymentConsent,
-        Retrieve $retrievePaymentConsent,
-        CustomerRepositoryInterface $customerRepository,
-        EavSetupFactory $eavSetupFactory,
-        EncryptorInterface $encrypter,
-        PaymentTokenRepositoryInterface $tokenRepository,
-        PaymentTokenManagement $tokenManagement,
-        PaymentTokenFactoryInterface $tokenFactory,
-        StoreManagerInterface $storeManager,
-        RetrieveCustomerClientSecret $retrieveCustomerClientSecret,
+        CreateCustomer                       $createCustomer,
+        GetList                              $paymentConsentList,
+        Disable                              $disablePaymentConsent,
+        Retrieve                             $retrievePaymentConsent,
+        CustomerRepositoryInterface          $customerRepository,
+        EavSetupFactory                      $eavSetupFactory,
+        EncryptorInterface                   $encryptor,
+        PaymentTokenRepositoryInterface      $tokenRepository,
+        PaymentTokenManagement               $tokenManagement,
+        PaymentTokenFactoryInterface         $tokenFactory,
+        StoreManagerInterface                $storeManager,
+        RetrieveCustomerClientSecret         $retrieveCustomerClientSecret,
         ClientSecretResponseInterfaceFactory $clientSecretResponseFactory,
-        RetrieveCustomer $retrieveCustomer,
-        FilterBuilder $filterBuilder,
-        SearchCriteriaBuilder $searchCriteriaBuilder
-    ) {
+        RetrieveCustomer                     $retrieveCustomer,
+        FilterBuilder                        $filterBuilder,
+        SearchCriteriaBuilder                $searchCriteriaBuilder
+    )
+    {
         $this->createCustomer = $createCustomer;
         $this->paymentConsentList = $paymentConsentList;
         $this->customerRepository = $customerRepository;
         $this->disablePaymentConsent = $disablePaymentConsent;
         $this->retrievePaymentConsent = $retrievePaymentConsent;
         $this->eavSetupFactory = $eavSetupFactory;
-        $this->encrypter = $encrypter;
+        $this->encryptor = $encryptor;
         $this->tokenRepository = $tokenRepository;
         $this->tokenManagement = $tokenManagement;
         $this->tokenFactory = $tokenFactory;
@@ -96,12 +98,12 @@ class PaymentConsents implements PaymentConsentsInterface
      * @param CustomerInterface $customer
      * @return string
      */
-    public function generateAirwallexCustomerId($customer)
+    public function generateAirwallexCustomerId(CustomerInterface $customer): string
     {
         $timestamp = time();
         $id = $customer->getId();
         $rand = rand(100000, 999999);
-        $str = (string)$timestamp . '-' . (string)$id . '-' . (string)$rand;
+        $str = $timestamp . '-' . $id . '-' . $rand;
         return substr($str, 0, 64);
     }
 
@@ -109,23 +111,20 @@ class PaymentConsents implements PaymentConsentsInterface
      * @param CustomerInterface $customer
      * @return string
      * @throws GuzzleException
-     * @throws JsonException
      * @throws LocalizedException
      * @throws NoSuchEntityException
      */
-    public function createAirwallexCustomer($customer): string
+    public function createAirwallexCustomer(CustomerInterface $customer): string
     {
         $eavSetup = $this->eavSetupFactory->create([]);
         $attr = $eavSetup->getAttribute(Customer::ENTITY, self::KEY_AIRWALLEX_CUSTOMER_ID);
         if (!$attr) {
-            // throw new LocalizedException(__('Airwallex Customer ID attribute not found.'));
             return '';
         }
 
         $airwallexCustomerId = $this->tryFindCustomerInVault($customer);
         if ($airwallexCustomerId) {
             $this->updateCustomerId($customer, $airwallexCustomerId);
-            // $this->syncVault($customer->getId());
             return $airwallexCustomerId;
         }
 
@@ -142,11 +141,8 @@ class PaymentConsents implements PaymentConsentsInterface
      * @param CustomerInterface $customer
      * @return string
      * @throws GuzzleException
-     * @throws JsonException
-     * @throws LocalizedException
-     * @throws NoSuchEntityException
      */
-    private function tryFindCustomerInVault($customer)
+    private function tryFindCustomerInVault(CustomerInterface $customer): string
     {
         $customerId = $customer->getId();
         $tokens = $this->getTokens($customerId) ?: array();
@@ -171,7 +167,6 @@ class PaymentConsents implements PaymentConsentsInterface
                     continue;
                 }
                 return '';
-                // throw $e;
             }
         }
         return $oldAirwallexCustomerId;
@@ -181,11 +176,10 @@ class PaymentConsents implements PaymentConsentsInterface
      * @param int $customerId
      * @return string
      * @throws GuzzleException
-     * @throws JsonException
      * @throws LocalizedException
      * @throws NoSuchEntityException
      */
-    public function createAirwallexCustomerById($customerId): string
+    public function createAirwallexCustomerById(int $customerId): string
     {
         if ($target = $this->getAirwallexCustomerIdInDB($customerId)) {
             return $target;
@@ -210,20 +204,35 @@ class PaymentConsents implements PaymentConsentsInterface
     /**
      * @param int $customerId
      * @return SavedPaymentResponseInterface[]|array
+     * @throws GuzzleException
+     * @throws JsonException
      * @throws LocalizedException
      * @throws NoSuchEntityException
      */
-    public function getSavedCards($customerId)
+    public function getSavedCards(int $customerId): array
     {
         $airwallexCustomerId = $this->getAirwallexCustomerIdInDB($customerId);
         if (!$airwallexCustomerId) return [];
 
-        return $this->paymentConsentList
-            ->setCustomerId($airwallexCustomerId)
-            ->setPage(0, 200)
-            //            ->setNextTriggeredBy(GetList::TRIGGERED_BY_CUSTOMER)
-            //            ->setTriggerReason(GetList::TRIGGER_REASON_UNSCHEDULED)
-            ->send();
+        $index = 0;
+        $cards = [];
+        while (true) {
+            $res = $this->paymentConsentList
+                ->setCustomerId($airwallexCustomerId)
+                ->setPage($index, 10)
+                ->setNextTriggeredBy(GetList::TRIGGERED_BY_CUSTOMER)
+                ->setStatus(PaymentConsents::STATUS_VERIFIED)
+                ->send();
+
+            $index++;
+            if (!empty($res['items'])) {
+                $cards = array_merge($cards, $res['items']);
+            }
+            if (!$res['has_more']) {
+                break;
+            }
+        }
+        return $cards;
     }
 
     /**
@@ -235,7 +244,7 @@ class PaymentConsents implements PaymentConsentsInterface
      * @throws LocalizedException
      * @throws NoSuchEntityException
      */
-    public function disablePaymentConsent($customerId, $paymentConsentId): bool
+    public function disablePaymentConsent(int $customerId, string $paymentConsentId): bool
     {
         $airwallexCustomerId = $this->getAirwallexCustomerIdInDB($customerId);
         if (!$airwallexCustomerId) {
@@ -270,9 +279,12 @@ class PaymentConsents implements PaymentConsentsInterface
     /**
      * @param int $customerId
      * @return array
-     * @throws \Exception
+     * @throws GuzzleException
+     * @throws JsonException
+     * @throws LocalizedException
+     * @throws NoSuchEntityException
      */
-    private function cloudCards($customerId)
+    private function cloudCards(int $customerId): array
     {
         $cards = $this->getSavedCards($customerId);
         if (!$cards) {
@@ -292,11 +304,14 @@ class PaymentConsents implements PaymentConsentsInterface
     }
 
     /**
-     * @param int $customerId
+     * @param ?int $customerId
      * @return string
+     * @throws LocalizedException
+     * @throws NoSuchEntityException
      */
-    public function getAirwallexCustomerIdInDB($customerId)
+    public function getAirwallexCustomerIdInDB(?int $customerId): string
     {
+        if (!$customerId) return "";
         $customer = $this->customerRepository->getById($customerId);
         $airwallexCustomerIdAttribute = $customer->getCustomAttribute(self::KEY_AIRWALLEX_CUSTOMER_ID);
 
@@ -306,11 +321,15 @@ class PaymentConsents implements PaymentConsentsInterface
         }
         return $airwallexCustomerId;
     }
+
     /**
      * @param int $customerId
      * @return bool
+     * @throws GuzzleException
+     * @throws LocalizedException
+     * @throws NoSuchEntityException
      */
-    public function syncVault($customerId)
+    public function syncVault(int $customerId): bool
     {
         $airwallexCustomerId = $this->getAirwallexCustomerIdInDB($customerId);
         if (!$airwallexCustomerId) {
@@ -319,7 +338,7 @@ class PaymentConsents implements PaymentConsentsInterface
 
         try {
             $cloudCards = $this->cloudCards($customerId);
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             return false;
         }
 
@@ -333,21 +352,18 @@ class PaymentConsents implements PaymentConsentsInterface
                 $this->tokenRepository->delete($token);
                 continue;
             }
+
             $dbCards[$token->getGatewayToken()] = true;
         }
+
 
         $code = Vault::CODE;
         $type = 'card';
 
-
+        $cloudCardsTokens = [];
         foreach ($cloudCards as $index => $cloudCard) {
+            $cloudCardsTokens[$index] = true;
             if (empty($dbCards[$index])) {
-                // if ($token = $this->tokenManagement->getByGatewayToken($index, Vault::CODE, $customerId)) {
-                //     try {
-                //         $this->disablePaymentConsent($customerId, $index);
-                //     } catch (\Exception $e) {};
-                //     continue;
-                // }
                 $token = $this->tokenFactory->create();
                 $token->setCustomerId($customerId);
                 $token->setWebsiteId($this->storeManager->getStore()->getWebsiteId());
@@ -357,13 +373,14 @@ class PaymentConsents implements PaymentConsentsInterface
                 $details = json_encode([
                     'type' => $cloudCard['card_brand'],
                     'icon' => $cloudCard['card_icon'],
+                    'status' => PaymentConsents::STATUS_VERIFIED,
                     'id' => $index,
                     'customer_id' => $airwallexCustomerId,
                     'maskedCC' => $cloudCard['card_last_four'],
                     'expirationDate' => $cloudCard['card_expiry_month'] . '/' . $cloudCard['card_expiry_year'],
                 ]);
                 $token->setTokenDetails($details);
-                $hash = $this->encrypter->getHash($customerId . $code . $type . $details);
+                $hash = $this->encryptor->getHash($customerId . $code . $type . $details);
                 $token->setPublicHash($hash);
                 $token->setExpiresAt(
                     sprintf(
@@ -374,18 +391,44 @@ class PaymentConsents implements PaymentConsentsInterface
                 );
                 try {
                     $this->tokenRepository->save($token);
-                } catch (\Exception $e) {
+                } catch (Exception $e) {
                 }
             }
         }
 
+        $allTokens = $this->tokenManagement->getListByCustomerId($customerId);
+        foreach ($allTokens as $token) {
+            $detail = $token->getTokenDetails();
+            if (!$detail) continue;
+            $arr = json_decode($detail, true);
+            if (!empty($cloudCardsTokens[$token->getGatewayToken()])) {
+                if (!empty($arr['status']) && $arr['status'] === PaymentConsents::STATUS_VERIFIED) {
+                    continue;
+                }
+                $arr['status'] = PaymentConsents::STATUS_VERIFIED;
+            } else {
+                if (!empty($arr['status']) && $arr['status'] === 'NOT-' . PaymentConsents::STATUS_VERIFIED) {
+                    continue;
+                }
+                $arr['status'] = 'NOT-' . PaymentConsents::STATUS_VERIFIED;
+            }
+            $details = json_encode($arr);
+            $token->setTokenDetails($details);
+            $this->tokenRepository->save($token);
+        }
+
         return true;
     }
+
     /**
      * @param int $customerId
      * @return ClientSecretResponseInterface
+     * @throws GuzzleException
+     * @throws JsonException
+     * @throws LocalizedException
+     * @throws NoSuchEntityException
      */
-    public function generateClientSecret($customerId)
+    public function generateClientSecret(int $customerId): ClientSecretResponseInterface
     {
         $response = $this->clientSecretResponseFactory->create();
 
@@ -406,14 +449,13 @@ class PaymentConsents implements PaymentConsentsInterface
     }
 
 
-
     /**
      * getTokens
      *
      * @param int $customerId
-     * @return Data\PaymentTokenInterface[]
+     * @return PaymentTokenInterface[]
      */
-    public function getTokens($customerId)
+    public function getTokens(int $customerId): array
     {
         $customerFilter = [
             $this->filterBuilder->setField(PaymentTokenInterface::CUSTOMER_ID)

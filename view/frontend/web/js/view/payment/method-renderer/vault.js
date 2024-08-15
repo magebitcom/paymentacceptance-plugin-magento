@@ -2,25 +2,15 @@
 define([
     'ko',
     'jquery',
-    'mage/storage',
     'Magento_Vault/js/view/payment/method-renderer/vault',
     'Magento_Checkout/js/model/quote',
-    'mage/url',
-    'Magento_Customer/js/customer-data',
-    'Magento_Checkout/js/model/payment/place-order-hooks',
-    'Magento_Customer/js/model/customer',
     'Airwallex_Payments/js/view/payment/utils',
     'Airwallex_Payments/js/view/payment/method-renderer/address/address-handler'
 ], function (
     ko,
     $,
-    storage,
     VaultComponent,
     quote,
-    urlBuilder,
-    customerData,
-    placeOrderHooks,
-    customer,
     utils,
     addressHandler
 ) {
@@ -99,8 +89,14 @@ define([
          * @returns {String}
          */
         getIcons: function (type) {
+            if (type.toLowerCase() === 'union pay') {
+                let vi = window.checkoutConfig.payment.ccform.icons['VI'];
+                let ret = JSON.parse(JSON.stringify(vi));
+                ret.url = ret.url.replace('vi.png', 'un.png');
+                return ret;
+            }
             for (const [name, obj] of Object.entries(window.checkoutConfig.payment.ccform.icons)) {
-                if ('AMEX' === type) {
+                if ('amex' === type.toLowerCase()) {
                     type = 'AE';
                     break
                 }
@@ -125,14 +121,15 @@ define([
             return this.details.customer_id === window.checkoutConfig.payment.airwallex_payments.airwallex_customer_id;
         },
 
-        initCvcForm: function (id) {
+        initCvcForm: async function (id) {
             $('body').trigger('processStart');
             if (this.cvcElement) this.cvcElement.destroy();
             Airwallex.init({
                 env: window.checkoutConfig.payment.airwallex_payments.mode,
                 origin: window.location.origin,
             });
-
+            if (this.cvcDetail) this.cvcDetail.complete = false;
+            this.validationError('');
             this.cvcElement = Airwallex.createElement('cvc');
             const domElement = this.cvcElement.mount(id + '-cvc', { autoCapture: this.autoCapture });
             domElement.addEventListener('onReady', (event) => {
@@ -144,10 +141,40 @@ define([
                     this.validationError('');
                 }
             })
+
+            if (!window.airwallexSavedCards) {
+                window.airwallexSavedCards = await utils.getSavedCards();
+            }
+            for (let card of window.airwallexSavedCards) {
+                if (card.id === $('#v-' + id).val()) {
+                    if (!card.billing) { continue; }
+                    let cardBilling = JSON.parse(card.billing)
+                    let billing = {
+                        firstname: cardBilling.first_name,
+                        lastname: cardBilling.last_name,
+                        telephone: cardBilling.phone_number || '000-00000000',
+                        countryId: cardBilling.address.country_code,
+                        regionId: 0,
+                        region: cardBilling.address.state,
+                        city: cardBilling.address.city, // taking "city1" from "city1-2"
+                        street: cardBilling.address.street.split(', '),
+                        postcode: cardBilling.address.postcode
+                    }
+
+                    let regionId = await utils.getRegionId(cardBilling.address.country_code, cardBilling.address.state);
+                    billing.regionId = regionId;
+                    await addressHandler.postBillingAddress({
+                        'cartId': quote.getQuoteId(),
+                        'address': billing
+                    }, utils.isLoggedIn(), quote.getQuoteId());
+                    break;
+                }
+            }
         },
 
         placeOrder: function (data, event) {
             const self = this;
+            this.validationError('');
 
             if (event) {
                 event.preventDefault();
@@ -158,82 +185,11 @@ define([
                 return
             }
 
-            $('body').trigger('processStart');
-
-            const payload = {
-                cartId: quote.getQuoteId(),
-                billingAddress: quote.billingAddress(),
-                paymentMethod: {
-                    method: 'airwallex_payments_card',
-                    additional_data: {},
-                },
-            };
-
-            let serviceUrl = urlBuilder.build('rest/V1/airwallex/payments/guest-place-order');
-            if (customer.isLoggedIn()) {
-                serviceUrl = urlBuilder.build('rest/V1/airwallex/payments/place-order');
-                payload.email = quote.guestEmail;
+            if (!utils.validateAgreements('.payment-method._active .checkout-agreements input[type="checkbox"]')) {
+                return;
             }
 
-            let headers = {};
-            _.each(placeOrderHooks.requestModifiers, function (modifier) {
-                modifier(headers, payload);
-            });
-
-            payload.intent_id = null;
-
-            (new Promise(async function (resolve, reject) {
-                try {
-                    if (self.isRecaptchaEnabled) {
-                        let recaptchaRegistry = require('Magento_ReCaptchaWebapiUi/js/webapiReCaptchaRegistry');
-                        if (recaptchaRegistry) {
-                            payload.xReCaptchaValue = await new Promise((resolve, reject) => {
-                                recaptchaRegistry.addListener(utils.getRecaptchaId(), (token) => {
-                                    resolve(token);
-                                });
-                                recaptchaRegistry.triggers[utils.getRecaptchaId()]();
-                            });
-                        }
-                    }
-
-                    const intentResponse = await storage.post(
-                        serviceUrl, JSON.stringify(payload), true, 'application/json', headers
-                    );
-
-                    const selectedConsentId = $("#v-" + $('input[name="payment[method]"]:checked').val()).val();
-                    const response = await Airwallex.confirmPaymentIntent({
-                        intent_id: intentResponse.intent_id,
-                        client_secret: intentResponse.client_secret,
-                        payment_consent_id: selectedConsentId,
-                        element: self.cvcElement,
-                        payment_method: {
-                            billing: self.getBillingInformation()
-                        },
-                        payment_method_options: {
-                            card: {
-                                auto_capture: self.autoCapture
-                            }
-                        },
-                    });
-
-                    payload.intent_id = intentResponse.intent_id;
-                    payload.paymentMethod.additional_data.intent_id = intentResponse.intent_id;
-
-                    const endResult = await storage.post(
-                        serviceUrl, JSON.stringify(payload), true, 'application/json', headers
-                    );
-
-                    resolve(endResult);
-                } catch (e) {
-                    reject(e);
-                }
-            })).then(function (response) {
-                utils.clearDataAfterPay(response, customerData)
-
-                window.location.replace(urlBuilder.build('checkout/onepage/success/'));
-            }).catch(
-                utils.processPlaceOrderError.bind(self)
-            );
+            utils.pay(self, 'vault', quote);
         }
     });
 });
