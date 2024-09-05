@@ -22,6 +22,21 @@ class Refund extends AbstractWebhook
     public const WEBHOOK_SUCCESS_NAME = 'refund.accepted';
 
     /**
+     * @var OrderRepository
+     */
+    private OrderRepository $orderRepository;
+
+    /**
+     * @var PaymentIntentRepository
+     */
+    private PaymentIntentRepository $paymentIntentRepository;
+
+    /**
+     * @var CacheInterface
+     */
+    private CacheInterface $cache;
+
+    /**
      * @var CreditmemoFactory
      */
     private CreditmemoFactory $creditmemoFactory;
@@ -30,11 +45,6 @@ class Refund extends AbstractWebhook
      * @var CreditmemoService
      */
     private CreditmemoService $creditmemoService;
-
-    /**
-     * @var CacheInterface
-     */
-    private CacheInterface $cache;
 
     /**
      * Refund constructor.
@@ -48,14 +58,15 @@ class Refund extends AbstractWebhook
     public function __construct(
         OrderRepository $orderRepository,
         PaymentIntentRepository $paymentIntentRepository,
+        CacheInterface $cache,
         CreditmemoFactory $creditmemoFactory,
-        CreditmemoService $creditmemoService,
-        CacheInterface $cache
+        CreditmemoService $creditmemoService
     ) {
-        parent::__construct($orderRepository, $paymentIntentRepository);
+        $this->orderRepository = $orderRepository;
+        $this->paymentIntentRepository = $paymentIntentRepository;
+        $this->cache = $cache;
         $this->creditmemoFactory = $creditmemoFactory;
         $this->creditmemoService = $creditmemoService;
-        $this->cache = $cache;
     }
 
     /**
@@ -70,21 +81,21 @@ class Refund extends AbstractWebhook
      */
     public function execute(object $data): void
     {
-        $paymentIntentId = $data->payment_intent_id;
+        $intentId = $data->payment_intent_id;
 
         /** @var Order $order */
-        $order = $this->paymentIntentRepository->getOrder($paymentIntentId);
+        $order = $this->paymentIntentRepository->getOrder($intentId);
         if (!$order) {
             throw new WebhookException(__('Can\'t find order'));
         }
 
-        $cacheName = $this->refundCacheName($paymentIntentId);
+        $cacheName = $this->refundCacheName($intentId);
         if ($this->cache->load($cacheName)) {
             $this->cache->remove($cacheName);
             return;
         }
 
-        $record = $this->paymentIntentRepository->getByIntentId($paymentIntentId);
+        $record = $this->paymentIntentRepository->getByIntentId($intentId);
         $detail = $record->getDetail();
         $detailArray = $detail ? json_decode($detail, true) : [];
         if (!empty($detailArray['refund_ids']) && in_array($data->id, $detailArray['refund_ids'], true)) {
@@ -117,6 +128,7 @@ class Refund extends AbstractWebhook
      */
     private function createCreditMemo(Order $order, float $refundAmount, string $reason): void
     {
+        /** @var Order\Invoice $invoice */
         $invoice = $order->getInvoiceCollection()->getFirstItem();
 
         if (!$invoice) {
@@ -144,7 +156,6 @@ class Refund extends AbstractWebhook
         $creditMemo->setGrandTotal($refundAmount);
 
         $this->creditmemoService->refund($creditMemo, true);
-        $order->addCommentToStatusHistory(__('Order refunded through Airwallex.'));
         $this->orderRepository->save($order);
     }
 }
