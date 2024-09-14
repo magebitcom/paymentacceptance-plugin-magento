@@ -31,9 +31,9 @@ define(
         return Component.extend({
             code: 'airwallex_payments_card',
             type: 'card',
-            cardNumberSelector: 'airwallex-card-element',
-            cardExpirySelector: 'airwallex-expiry-element',
-            cardCvcSelector: 'airwallex-cvc-element',
+            cardNumberSelector: 'awx-card-number',
+            cardExpirySelector: 'awx-card-expiry',
+            cardCvcSelector: 'awx-card-cvc',
             cardNumberElement: null,
             cardExpiryElement: null,
             cardCvcElement: null,
@@ -76,7 +76,7 @@ define(
             getBillingInformation: function () {
                 const billingAddress = quote.billingAddress();
                 if (!billingAddress) {
-                    throw new Error('Billing address is required.')
+                    throw new Error('Billing address is required.');
                 }
                 billingAddress.email = quote.guestEmail;
                 addressHandler.setIntentConfirmBillingAddressFromOfficial(billingAddress);
@@ -109,7 +109,7 @@ define(
                     style: {
                         base: {
                             fontSize: fontSize + 'px',
-                        }
+                        },
                     }
                 });
                 this.cardExpiryElement = Airwallex.createElement('expiry', {
@@ -136,7 +136,23 @@ define(
                             this.validationError('');
                         }
                     });
+
+                    this['card' + type + 'Element'].on('focus', () => {
+                        this.validationError('');
+                        $("#awx-card-" + type.toLowerCase()).css("border", "1px solid #612fff");
+                    });
+                    this['card' + type + 'Element'].on('blur', () => {
+                        $("#awx-card-" + type.toLowerCase()).css("border", "none");
+                    });
                 }
+
+                this.cardNumberElement.on('ready', () => {
+                    this.cardNumberElement.focus();
+                });
+
+                $('.airwallex-card-container .payment-method-title').click(() => {
+                    this.cardNumberElement.focus();
+                });
             },
 
             initiateOrderPlacement: async function () {
@@ -162,7 +178,7 @@ define(
                 return $('#airwallex-payments-card-save').is(':checked');
             },
 
-            async placeOrder () {
+            async placeOrder() {
                 let self = this;
                 this.validationError('');
                 if (this.validate() && additionalValidators.validate()) {
