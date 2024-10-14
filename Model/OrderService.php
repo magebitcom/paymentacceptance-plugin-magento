@@ -8,7 +8,7 @@ use Airwallex\Payments\Api\Data\PlaceOrderResponseInterfaceFactory;
 use Airwallex\Payments\Api\OrderServiceInterface;
 use Airwallex\Payments\Api\PaymentConsentsInterface;
 use Airwallex\Payments\Helper\Configuration;
-use Airwallex\Payments\Helper\isOrderCreatedHelper;
+use Airwallex\Payments\Helper\IsOrderCreatedHelper;
 use Airwallex\Payments\Plugin\ReCaptchaValidationPlugin;
 use Exception;
 use GuzzleHttp\Exception\GuzzleException;
@@ -296,7 +296,10 @@ class OrderService implements OrderServiceInterface
         $cacheName = AbstractClient::METADATA_PAYMENT_METHOD_PREFIX . $quote->getEntityId();
         $this->cache->save($from ?: $paymentMethod->getMethod(), $cacheName, [], 60);
 
-        $intent = $this->paymentIntents->getIntentByOrder($order);
+        $getPhoneAddress = $quote->isVirtual() ? $quote->getBillingAddress() : $quote->getShippingAddress();
+        $phone = $getPhoneAddress->getTelephone() ?? '';
+        $argEmail = $uid ? $quote->getCustomerEmail() : $email;
+        $intent = $this->paymentIntents->getIntentByOrder($order, $phone, $argEmail, $from);
         $resp = $this->intentGet->setPaymentIntentId($intent['id'])->send();
         $intentResponse = json_decode($resp, true);
         $intentResponse['status'] = PaymentIntentInterface::INTENT_STATUS_SUCCEEDED;

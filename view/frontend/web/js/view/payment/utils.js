@@ -603,6 +603,10 @@ define([
 
             payload.intent_id = null;
 
+            if (from === 'card' && self.isSaveCardSelected() && self.getCustomerId()) {
+                payload.from = 'card_with_saved';
+            }
+
             await this.setRecaptchaToken(payload, this.getRecaptchaId());
 
             try {
@@ -628,11 +632,13 @@ define([
                         });
                     } else {
                         if (self.isSaveCardSelected() && self.getCustomerId()) {
-                            payload.from = 'card_with_saved';
+                            let requestUrl = urlBuilder.build('rest/V1/airwallex/generate_client_secret');
+                            let res = await storage.get(requestUrl, undefined, 'application/json', {});
+        
                             await Airwallex.createPaymentConsent({
                                 intent_id: intentResponse.intent_id,
                                 customer_id: self.getCustomerId(),
-                                client_secret: intentResponse.client_secret,
+                                client_secret: res.client_secret,
                                 currency: quote.totals().quote_currency_code,
                                 billing: self.getBillingInformation(),
                                 element: self.cardNumberElement,
