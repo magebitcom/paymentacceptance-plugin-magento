@@ -7,6 +7,7 @@ use Airwallex\Payments\Api\Data\PlaceOrderResponseInterfaceFactory;
 use Airwallex\Payments\Api\ServiceInterface;
 use Airwallex\Payments\Helper\Configuration;
 use Airwallex\Payments\Model\Client\Request\ApplePayValidateMerchant;
+use Airwallex\Payments\Model\Client\Request\CurrencySwitcher;
 use Exception;
 use GuzzleHttp\Exception\GuzzleException;
 use JsonException;
@@ -44,6 +45,11 @@ use Magento\Sales\Model\Spi\OrderResourceInterface;
 use Magento\Sales\Model\OrderFactory;
 use Airwallex\Payments\Model\Client\Request\ApplePayDomain\GetList;
 use Airwallex\Payments\Model\Client\Request\ApplePayDomain\Add;
+use Airwallex\Payments\Helper\AvailablePaymentMethodsHelper;
+use Magento\Framework\App\CacheInterface;
+use Magento\Framework\App\Cache\Manager;
+use Magento\Framework\App\Config\Storage\Writer;
+use Magento\Framework\App\Filesystem\DirectoryList;
 
 class Service implements ServiceInterface
 {
@@ -78,6 +84,12 @@ class Service implements ServiceInterface
     protected OrderFactory $orderFactory;
     protected GetList $appleDomainList;
     protected Add $appleDomainAdd;
+    protected DirectoryList $directoryList;
+    protected AvailablePaymentMethodsHelper $availablePaymentMethodsHelper;
+    protected CacheInterface $cache;
+    protected Manager $cacheManager;
+    protected Writer $configWriter;
+    protected CurrencySwitcher $currencySwitcher;
 
     /**
      * Index constructor.
@@ -111,6 +123,12 @@ class Service implements ServiceInterface
      * @param OrderFactory $orderFactory
      * @param GetList $appleDomainList
      * @param Add $appleDomainAdd
+     * @param DirectoryList $directoryList
+     * @param AvailablePaymentMethodsHelper $availablePaymentMethodsHelper
+     * @param CacheInterface $cache
+     * @param Manager $cacheManager
+     * @param Writer $configWriter
+     * @param CurrencySwitcher $currencySwitcher
      */
     public function __construct(
         Configuration                          $configuration,
@@ -141,7 +159,13 @@ class Service implements ServiceInterface
         OrderResourceInterface                 $orderResource,
         OrderFactory                           $orderFactory,
         GetList                                $appleDomainList,
-        Add                                    $appleDomainAdd
+        Add                                    $appleDomainAdd,
+        DirectoryList                          $directoryList,
+        AvailablePaymentMethodsHelper          $availablePaymentMethodsHelper,
+        CacheInterface                         $cache,
+        Manager                                $cacheManager,
+        Writer                                 $configWriter,
+        CurrencySwitcher                       $currencySwitcher
     )
     {
         $this->configuration = $configuration;
@@ -173,6 +197,12 @@ class Service implements ServiceInterface
         $this->orderFactory = $orderFactory;
         $this->appleDomainList = $appleDomainList;
         $this->appleDomainAdd = $appleDomainAdd;
+        $this->directoryList = $directoryList;
+        $this->availablePaymentMethodsHelper = $availablePaymentMethodsHelper;
+        $this->cache = $cache;
+        $this->cacheManager = $cacheManager;
+        $this->configWriter = $configWriter;
+        $this->currencySwitcher = $currencySwitcher;
     }
 
     /**
@@ -263,6 +293,9 @@ class Service implements ServiceInterface
         return [
             'subtotal' => $quote->getSubtotal() ?? 0,
             'grand_total' => $quote->getGrandTotal() ?? 0,
+            'base_grand_total' => $quote->getBaseGrandTotal() ?? 0,
+            'base_currency_code' => $quote->getBaseCurrencyCode() ?? '',
+            'base_to_quote_rate' => $quote->getBaseToQuoteRate() ?? '',
             'shipping_amount' => $quote->getShippingAddress()->getShippingAmount() ?? 0,
             'tax_amount' => $taxAmount ?: 0,
             'subtotal_with_discount' => $quote->getSubtotalWithDiscount() ?? 0,

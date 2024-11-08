@@ -64,7 +64,7 @@ define([
             if (response && response.responseType !== 'error') {
                 customerData.set('checkout-data', clearData);
                 customerData.invalidate(['cart']);
-                customerData.reload(['cart'], true);
+                // customerData.reload(['cart'], true);
             }
         },
 
@@ -163,6 +163,15 @@ define([
             return status;
         },
 
+        showAgreements() {
+            if (!this.isCheckoutPage()) return;
+            let agreementsConfig = window.checkoutConfig.checkoutAgreements || {};
+            if (agreementsConfig.isEnabled && $(this.agreementSelector).length) {
+                $(".airwallex-express-checkout .checkout-agreements").show();
+                return;
+            }
+        },
+
         initCheckoutPageExpressCheckoutAgreement() {
             if (this.isCheckoutPage()) {
                 let agreementsConfig = window.checkoutConfig.checkoutAgreements || {};
@@ -246,6 +255,7 @@ define([
         },
 
         isRecaptchaShared() {
+            if (this.isCartPage()) return false;
             if (!window.checkoutConfig) return false;
             return window.checkoutConfig.payment.airwallex_payments.is_recaptcha_shared;
         },
@@ -634,7 +644,7 @@ define([
                         if (self.isSaveCardSelected() && self.getCustomerId()) {
                             let requestUrl = urlBuilder.build('rest/V1/airwallex/generate_client_secret');
                             let res = await storage.get(requestUrl, undefined, 'application/json', {});
-        
+
                             await Airwallex.createPaymentConsent({
                                 intent_id: intentResponse.intent_id,
                                 customer_id: self.getCustomerId(),

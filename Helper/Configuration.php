@@ -83,6 +83,16 @@ class Configuration extends AbstractHelper
     }
 
     /**
+     * Account
+     *
+     * @return string
+     */
+    public function getAccount(): string
+    {
+        return $this->scopeConfig->getValue('airwallex/general/account') ?? '';
+    }
+
+    /**
      * Api url
      *
      * @return string
@@ -110,6 +120,17 @@ class Configuration extends AbstractHelper
     public function isCardCaptureEnabled(): bool
     {
         return $this->scopeConfig->getValue('payment/airwallex_payments_card/airwallex_payment_action')
+            === MethodInterface::ACTION_AUTHORIZE_CAPTURE;
+    }
+
+    /**
+     * Card capture enabled
+     *
+     * @return bool
+     */
+    public function isKlarnaCaptureEnabled(): bool
+    {
+        return $this->scopeConfig->getValue('payment/airwallex_payments_klarna/airwallex_payment_action')
             === MethodInterface::ACTION_AUTHORIZE_CAPTURE;
     }
 
