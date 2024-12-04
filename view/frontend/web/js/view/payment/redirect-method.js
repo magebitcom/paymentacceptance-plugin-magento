@@ -70,10 +70,13 @@ define([
                     $(".awx-afterpay-countries-component").html('');
                     this.validationError('');
                     this.hideYouPay();
-                    if (this.isSwitcherMethod()) await this.testPaymentMethod();
+                    let passed = true;
+                    if (this.isSwitcherMethod()) {
+                        passed = await this.testPaymentMethod();
+                    }
                     $('body').trigger('processStop');
                     window.awxBillingAddress = JSON.stringify(newAddress);
-                    if (this.isAirwallexPayment(quote.paymentMethod()) && !newAddress) {
+                    if (!passed || (this.isAirwallexPayment(quote.paymentMethod()) && !newAddress)) {
                         this.disableCheckoutButton();
                     } else {
                         this.activeCheckoutButton();
@@ -96,6 +99,7 @@ define([
                     await this.testPaymentMethod();
                     $('body').trigger('processStop');
                 });
+                await this.testPaymentMethod();
             }
         },
 
@@ -152,7 +156,7 @@ define([
                     that.activeCheckoutButton();
                 }
             });
-            $input.off('focus').on('focus', function () {
+            let showCountries = function () {
                 $(".awx-afterpay-countries .countries").fadeIn(300);
                 let country = localStorage.getItem("awx_afterpay_country");
                 if (country) {
@@ -163,17 +167,23 @@ define([
                     }
                   });
                 }
-            });
+            };
+            $input.off('focus').on('focus', showCountries);
+            $('.awx-afterpay-countries-component .input-icon').off('click').on('click', showCountries);
             $input.off('blur').on('blur', function () {
                 $(".awx-afterpay-countries .countries").fadeOut(300);
             });
             $li.off('click').on('click', async function () {
+                let $body = $('body');
+                that.validationError('');
+                $('.awx-you-pay').hide();
+                $body.trigger('processStart');
                 $(".awx-afterpay-countries input").val($(this).html());
                 localStorage.setItem("awx_afterpay_country", $(this).data("value"));
                 $(".awx-afterpay-countries li").each(function () {
                     $(this).removeClass("selected");
                 });
-                let $body = $('body');
+                $(".awx-afterpay-countries .countries").fadeOut(300);
                 const countryToCurrency = window.checkoutConfig.payment.airwallex_payments.afterpay_support_countries;
                 let country = $(this).data("value");
                 let targetCurrency = countryToCurrency[country];
@@ -185,6 +195,9 @@ define([
                 let switchers = JSON.parse(switcher);
                 that.validationError(that.switcherTip(targetCurrency, 'afterpay'));
                 that.showYouPay(switchers);
+                if (localStorage.getItem('awx_afterpay_country')) {
+                    that.activeCheckoutButton();
+                }
                 $body.trigger('processStop');
             });
         },
@@ -254,12 +267,15 @@ define([
             }
 
             let targetCurrency;
-            if (quote.billingAddress() && countryToCurrency[quote.billingAddress().countryId]) {
-                targetCurrency = countryToCurrency[quote.billingAddress().countryId];
+            let cId = quote.billingAddress() ? quote.billingAddress().countryId : '';
+            if (cId === 'GB') cId = 'UK';
+            if (countryToCurrency[cId]) {
+                targetCurrency = countryToCurrency[cId];
                 if (entityToCurrency[entity].indexOf(targetCurrency) === -1) {
                     targetCurrency = '';
                 }
             }
+            let $body = $('body');
             if (!targetCurrency) {
                 let country = localStorage.getItem('awx_afterpay_country');
                 this.showPayafterCountries();
@@ -268,6 +284,7 @@ define([
                         if (!localStorage.getItem('awx_afterpay_country')) {
                             this.disableCheckoutButton();
                         }
+                        $body.trigger('processStop');
                         return false;
                     }
                     targetCurrency = entityToCurrency[entity][0];
@@ -275,7 +292,6 @@ define([
                     targetCurrency = countryToCurrency[country];
                 }
             }
-            let $body = $('body');
 
             let switcher = await storage.post(urlBuilder.build('rest/V1/airwallex/currency/switcher'), JSON.stringify({
                 'payment_currency': this.expressData.quote_currency_code,
@@ -304,7 +320,7 @@ define([
                 $(".totals.charge").hide();
                 if (!quote.billingAddress()) {
                     $body.trigger('processStop');
-                    this.activeCheckoutButton();
+                    this.disableCheckoutButton();
                     return false;
                 }
 
